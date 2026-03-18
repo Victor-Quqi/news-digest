@@ -1,0 +1,109 @@
+email_subject: "Daily News Digest"
+taxonomy:
+  - "Tech"
+  - "Finance"
+  - "Policy"
+  - "Market"
+  - "International"
+  - "Other"
+default_category: "Other"
+
+prompts:
+  phase1:
+    system: |-
+      Task: output oneLine and category for each news item.
+      oneLine: a single concise English line, clear and specific, keeping only the core information.
+      category: choose exactly 1, preferably from {taxonomy_text}; if none fits, you may use a more suitable custom category.
+      Output strict JSON only. No explanation, no Markdown.
+    user: |-
+      Please process the following {count} news items.
+      Available categories: {taxonomy_json}
+      Output format:
+      {example_output}
+
+      articles={articles_json}
+  phase2:
+    system_json: |-
+      Task: output summaryLines for the news overview. Write in English even if articles are in other languages.
+      Rules:
+      - 5-9 lines total.
+      - Line 1 must summarize the overall daily trend and include at least one eye-catching specific event to draw readers in; no [id].
+      - From line 2 onward, each line should merge 2-4 news items and end with [id] references; multiple references are allowed.
+      - Target <= {summary_target} characters per line.
+      - Output strict JSON only. No explanation.
+    system_text: |-
+      Task: output the overview as plain text (not JSON). Write in English even if articles are in other languages.
+      Rules:
+      - 5-9 lines total.
+      - Line 1 must summarize the overall daily trend and include at least one eye-catching specific event to draw readers in; no [id].
+      - From line 2 onward, each line should merge 2-4 news items and end with [id] references; multiple references are allowed.
+      - Target <= {summary_target} characters per line.
+      - No explanation, no prefix/suffix, no title.
+    example_output: '{"summaryLines":["Line 1 (overall trend, no ids)","Line 2 (merge multiple items)...[1][3]"]}'
+    user: |-
+      Article count: {max_id}
+      Please generate the overview.
+      Output format:
+      {example_output}
+
+      articles={article_lines}
+
+theme_keywords:
+  "Crypto Assets":
+    - "比特币"
+    - "btc"
+    - "以太坊"
+    - "eth"
+    - "代币"
+    - "交易所"
+    - "coinbase"
+    - "binance"
+    - "空投"
+  "Macro Policy":
+    - "美联储"
+    - "非农"
+    - "就业"
+    - "利率"
+    - "白宫"
+    - "cftc"
+    - "政策"
+    - "财政"
+    - "央行"
+  "Geopolitics":
+    - "中东"
+    - "伊朗"
+    - "沙特"
+    - "霍尔木兹"
+    - "战争"
+    - "停火"
+    - "袭击"
+  "Tech AI":
+    - "ai"
+    - "人工智能"
+    - "算力"
+    - "芯片"
+    - "模型"
+    - "openai"
+    - "机器人"
+  "Equities & Companies":
+    - "美股"
+    - "a股"
+    - "港股"
+    - "纳指"
+    - "标普"
+    - "沪指"
+    - "公司"
+    - "营收"
+
+fallback:
+  no_articles: "No qualifying news today."
+  phase2_failed: "AI overview generation failed for this issue. The original article list is shown below."
+  no_overview: "No overview available today."
+  warning: "⚠ AI summarization/categorization failed for this issue. The current email is a degraded raw-article version."
+
+overview_placeholders:
+  - "Daily trend overview"
+  - "Today trend overview"
+  - "Trend overview"
+  - "Overview"
+  - "Summary"

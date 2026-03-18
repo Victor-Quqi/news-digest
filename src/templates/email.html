@@ -1,0 +1,123 @@
+<!--
+  All CSS is written as inline style attributes (no <style> block or CSS variables).
+  Email clients (QQ Mail, Gmail, Outlook, etc.) strip <style> tags from <head> and do
+  not support CSS custom properties (var()), causing class-based styles to break.
+  Background colors are set on <body>, the outer <table>, and <td> for compatibility.
+  Hidden preheader text is intentionally kept optional because QQ Mail mobile/web/desktop
+  still tends to preview visible body text like title/date/overview.
+-->
+<!DOCTYPE html>
+<html lang="{{ html_lang }}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% trans %}News Digest{% endtrans %} · {{ date_text }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f9ff;font-family:'Times New Roman',Times,serif,'Microsoft YaHei','SimSun';">
+  {% if preheader_text %}
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;color:transparent;mso-hide:all;">
+    {{ preheader_text }}
+  </div>
+  {% endif %}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background-color:#f5f9ff;">
+    <tr>
+      <td align="center" style="padding:24px 12px;background-color:#f5f9ff;">
+        <!--[if mso | IE]>
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="960" align="center" style="width:960px;">
+        <tr><td>
+        <![endif]-->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background-color:#ffffff;border:1px solid #e6eefb;border-radius:10px;max-width:960px;width:100%;">
+          <!-- Header -->
+          <tr>
+            <td style="padding:20px 24px;border-bottom:1px solid #e6eefb;">
+              <div style="font-size:28px;font-weight:800;color:#1f2937;">{% trans %}News Digest{% endtrans %}</div>
+              <div style="margin-top:4px;font-size:15px;color:#6b7280;">{{ date_text }} · {{ count }} {% trans %}articles today{% endtrans %}</div>
+            </td>
+          </tr>
+
+          <!-- Warning (degraded mode only) -->
+          {% if degraded and warnings %}
+          <tr>
+            <td style="padding:12px 24px;background:#fff7db;border-bottom:1px solid #ffd876;font-size:15px;color:#7a5c00;line-height:1.6;">
+              {% for line in warnings %}
+                <div>{{ line }}</div>
+              {% endfor %}
+            </td>
+          </tr>
+          {% endif %}
+
+          <!-- Summary -->
+          <tr>
+            <td style="padding:20px 24px 12px 24px;">
+              <div style="margin:0 0 8px 0;font-size:24px;font-weight:700;color:#1f2937;">{% trans %}Overview{% endtrans %}</div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+                {% if summary_lines_html %}
+                  {% for line in summary_lines_html %}
+                  <tr>
+                    <td style="padding:8px 0;font-size:17px;line-height:1.7;color:#1f2937;">{{ line | safe }}</td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td style="padding:8px 0;font-size:17px;line-height:1.7;color:#1f2937;">{% trans %}No overview available today{% endtrans %}</td>
+                  </tr>
+                {% endif %}
+              </table>
+              <div style="margin-top:8px;font-size:13px;color:#9ca3af;line-height:1.6;">{% trans %}Note: Bracketed numbers in the overview are clickable links to original articles.{% endtrans %}</div>
+            </td>
+          </tr>
+
+          <!-- Spacer -->
+          <tr>
+            <td style="padding:0 24px;"><div style="height:8px;"></div></td>
+          </tr>
+
+          <!-- Articles by category -->
+          <tr>
+            <td style="padding:0 24px 20px 24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+                {% if grouped %}
+                  {% for block in grouped %}
+                  <tr>
+                    <td style="padding:20px 0 10px 0;border-bottom:1px solid #e6eefb;">
+                      <div style="font-size:22px;font-weight:700;color:#1f2937;">{{ block.name }}</div>
+                    </td>
+                  </tr>
+                  {% for item in block.articles %}
+                  <tr>
+                    <td style="padding:16px 0;">
+                      <a href="{{ item.link }}" target="_blank" rel="noopener noreferrer" style="color:#1f2937;text-decoration:none;font-size:18px;line-height:1.5;display:block;">
+                        <span style="font-weight:700;">[{{ item.id }}]</span> {{ item.title }}
+                      </a>
+                      {% if item.one_line %}
+                      <div style="padding-top:6px;font-size:16px;color:#6b7280;line-height:1.6;">{{ item.one_line }}</div>
+                      {% endif %}
+                      <div style="padding-top:8px;font-size:15px;color:#6b7280;">— {{ format_pub_datetime(item.pub_date, timezone_name) }}</div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td style="padding:16px 0;">{% trans %}No content{% endtrans %}</td>
+                  </tr>
+                {% endif %}
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 24px;border-top:1px solid #e6eefb;font-size:15px;color:#6b7280;line-height:1.6;">
+              {% trans %}footer_before_author{% endtrans %} <a href="https://github.com/Victor-Quqi" target="_blank" rel="noopener noreferrer" style="color:#3b82f6;text-decoration:none;">Victor-Quqi</a> / news-digest {% trans %}footer_after_author{% endtrans %}
+            </td>
+          </tr>
+        </table>
+        <!--[if mso | IE]>
+        </td></tr></table>
+        <![endif]-->
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# RSS sources - one entry per feed
+# Each entry requires: url, name
+# Use ${RSSHUB_BASE_URL} for RSSHub routes (set in .env)
+- url: https://example.com/rss
+  name: Example Feed
+- url: ${RSSHUB_BASE_URL}/reuters/world
+  name: Reuters World

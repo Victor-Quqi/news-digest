@@ -1,0 +1,108 @@
+email_subject: "新闻日报"
+taxonomy:
+  - "科技"
+  - "金融"
+  - "政策"
+  - "市场"
+  - "国际"
+  - "其他"
+default_category: "其他"
+
+prompts:
+  phase1:
+    system: |-
+      任务：为每篇新闻输出 oneLine 和 category。
+      oneLine：中文单行，简洁明确，只保留核心信息。
+      category：仅选 1 个，优先从 {taxonomy_text} 中选择；若都不贴切可自定义更合适分类。
+      只输出严格 JSON，不要解释、不要 Markdown。
+    user: |-
+      请处理以下 {count} 篇新闻。
+      可选 category: {taxonomy_json}
+      输出格式：
+      {example_output}
+
+      articles={articles_json}
+  phase2:
+    system_json: |-
+      任务：输出新闻总览 summaryLines。用中文撰写。
+      规则：
+      - 共 5-9 行。
+      - 第1行写全天趋势总述，必须包含至少一个最吸引眼球的具体事件；不要 [id]。
+      - 第2行起每行合并 2-4 条新闻，行尾用 [id] 引用，可多个。
+      - 每行目标 <= {summary_target} 字。
+      - 只输出严格 JSON，不要解释。
+    system_text: |-
+      任务：输出总览纯文本（不要 JSON）。用中文撰写。
+      规则：
+      - 共 5-9 行。
+      - 第1行写全天趋势总述，必须包含至少一个最吸引眼球的具体事件；不要 [id]。
+      - 第2行起每行合并 2-4 条新闻，行尾用 [id] 引用，可多个。
+      - 每行目标 <= {summary_target} 字。
+      - 不要解释、前后缀、标题。
+    example_output: '{"summaryLines":["第一行（总述，不带编号）","第二行（多条合并）...[1][3]"]}'
+    user: |-
+      文章总数: {max_id}
+      请生成总览。
+      输出格式：
+      {example_output}
+
+      articles={article_lines}
+
+theme_keywords:
+  "加密资产":
+    - "比特币"
+    - "btc"
+    - "以太坊"
+    - "eth"
+    - "代币"
+    - "交易所"
+    - "coinbase"
+    - "binance"
+    - "空投"
+  "宏观政策":
+    - "美联储"
+    - "非农"
+    - "就业"
+    - "利率"
+    - "白宫"
+    - "cftc"
+    - "政策"
+    - "财政"
+    - "央行"
+  "地缘局势":
+    - "中东"
+    - "伊朗"
+    - "沙特"
+    - "霍尔木兹"
+    - "战争"
+    - "停火"
+    - "袭击"
+  "科技AI":
+    - "ai"
+    - "人工智能"
+    - "算力"
+    - "芯片"
+    - "模型"
+    - "openai"
+    - "机器人"
+  "股市公司":
+    - "美股"
+    - "a股"
+    - "港股"
+    - "纳指"
+    - "标普"
+    - "沪指"
+    - "公司"
+    - "营收"
+
+fallback:
+  no_articles: "今日暂无符合条件的新闻。"
+  phase2_failed: "本期 AI 总览生成失败，以下为原文列表。"
+  no_overview: "今日暂无可用总览。"
+  warning: "⚠ 本期 AI 摘要/分类生成失败，当前邮件为原文列表降级版。"
+
+overview_placeholders:
+  - "全天趋势总述"
+  - "今日趋势总述"
+  - "趋势总述"
+  - "总述"

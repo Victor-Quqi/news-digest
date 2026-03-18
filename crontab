@@ -1,0 +1,4 @@
+# Executed daily at 8:00
+CRON_TZ=Asia/Shanghai
+TZ=Asia/Shanghai
+0 8 * * * cd /app && /usr/local/bin/python -m src.main >> /var/log/cron.log 2>&1

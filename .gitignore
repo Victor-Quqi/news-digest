@@ -1,0 +1,38 @@
+# Secrets & local config
+.env
+config.yaml
+sources.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# Logs & runtime artifacts
+logs/
+*.log
+*.lock
+
+# Compiled translations
+*.mo
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

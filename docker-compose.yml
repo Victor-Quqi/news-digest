@@ -1,0 +1,13 @@
+services:
+  news-digest:
+    build: .
+    container_name: news-digest
+    restart: always
+    volumes:
+      # Create these files from the example files before starting the container.
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./sources.yaml:/app/sources.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai

@@ -1,0 +1,95 @@
+# Locale used for prompts, fallback copy, and the email template.
+locale: zh
+
+email:
+  # Final recipient list. Environment-variable expansion is supported.
+  to:
+    - ${EMAIL_TO}
+  # Base subject line. Locale data can still override it at render time.
+  subject: 新闻日报
+
+schedule:
+  # Cron expression used by the bundled cron-based Docker image.
+  cron: "0 8 * * *"
+  # Timezone used for filtering, timestamps, and rendered dates.
+  timezone: Asia/Shanghai
+
+ai:
+  # Sampling temperature for all model calls.
+  temperature: 0.3
+  # Max completion tokens requested from the model.
+  max_tokens: 16000
+  # End-to-end timeout for a single AI HTTP request, in seconds.
+  timeout: 180
+  # Reference context window used only for local shard planning.
+  context_window: 128000
+  # Start sharding when estimated tokens exceed this ratio of context_window.
+  shard_threshold_ratio: 0.6
+  # Hard limit for the number of articles sent in one phase-1 shard.
+  shard_max_articles: 35
+  # Hard limit for the combined character count of one phase-1 shard.
+  shard_max_chars: 120000
+  # Structured output formats to try for phase 1, in order.
+  # Supported values: json_schema, json_object. Use [] to disable structured output.
+  structured_output_phase1_formats: ["json_schema", "json_object"]
+  # strict: fail immediately if all structured attempts fail.
+  # prefer: try structured output first, then fall back to plain-text JSON.
+  structured_output_phase1_policy: strict
+  # Structured output formats to try for phase 2, in order.
+  structured_output_phase2_formats: ["json_schema", "json_object"]
+  # Same policy semantics as phase 1.
+  structured_output_phase2_policy: strict
+  # Retries for transient transport / rate-limit / timeout failures.
+  transient_retry_max: 3
+  # Retries for invalid JSON or schema / business-rule validation failures.
+  schema_retry_max: 3
+  # Base backoff schedule, in seconds, reused by retry logic.
+  backoff_seconds: [1, 2, 4]
+  # Extra random jitter added to retries, in milliseconds.
+  jitter_ms_max: 300
+  # Category labels expected from the model. Locale-specific prompts may override this.
+  taxonomy: ["科技", "金融", "政策", "市场", "国际", "其他"]
+  # If true, phase 2 may retry with plain-text output when JSON output fails.
+  phase2_text_fallback: false
+  # If true, phase 2 may build a local rule-based overview when AI output fails.
+  phase2_local_fallback: false
+  # If true, send a degraded raw-article email instead of failing the whole run.
+  fallback_send_raw_email: false
+  # Warning text shown in degraded emails.
+  fallback_warning_text: "⚠ 本期 AI 摘要/分类生成失败，当前邮件为原文列表降级版。"
+  # oneLine length controls. Weighted units treat CJK as 1 and ASCII as 0.5.
+  one_line_hard_units: 42.0
+  one_line_soft_units: 50.0
+  one_line_trim_target_units: 48.0
+  # Overview line length controls, counted in plain characters.
+  summary_line_target_len: 96
+  summary_line_hard_len: 112
+  summary_line_soft_len: 132
+  # Dump full model responses on failure.
+  debug_dump_on_error: true
+  # Dump every request/response pair. Prefer CLI flag --ai-debug for short-term debugging.
+  debug_dump_all: false
+  # Directory used for AI debug JSONL files.
+  debug_dump_dir: logs/ai-debug
+  # Rotate debug logs when the current file exceeds this size in bytes. <=0 disables rotation.
+  debug_dump_max_bytes: 20971520
+  # Delete debug logs older than this many days. <=0 disables age-based cleanup.
+  debug_dump_retention_days: 14
+  # Keep at most this many debug log files. <=0 disables count-based cleanup.
+  debug_dump_max_files: 300
+
+filter:
+  # Only keep articles published within the most recent N hours.
+  hours_back: 24
+  # Truncate cleaned article bodies before they are sent to the model.
+  max_content_length: 6000
+
+logging:
+  # Standard Python logging level.
+  level: INFO
+  # Main application log file.
+  file: logs/news-digest.log
+  # Rotate the main log when it exceeds this size in bytes.
+  max_bytes: 10485760
+  # Number of rotated log files to keep.
+  backup_count: 5
