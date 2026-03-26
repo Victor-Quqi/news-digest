@@ -48,8 +48,8 @@ class AIConfig:
         default_factory=lambda: ["json_schema", "json_object"]
     )
     structured_output_phase2_policy: str = "strict"  # strict / prefer
-    transient_retry_max: int = 3
-    schema_retry_max: int = 3
+    transient_retry_max: int = 5
+    schema_retry_max: int = 5
     backoff_seconds: List[int] = field(default_factory=lambda: [1, 2, 4])
     jitter_ms_max: int = 300
     taxonomy: List[str] = field(
