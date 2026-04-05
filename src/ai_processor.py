@@ -552,9 +552,9 @@ class AIProcessor:
                 best_score = score
                 best_id = candidate_id
 
+        # Near-duplicate news clusters often share people, countries, and verbs.
+        # Only fail when another title is clearly a much stronger match.
         if best_id != article_id and best_score >= 0.45 and best_score - own_score >= 0.25:
-            return (best_id, own_score, best_score)
-        if best_id != article_id and own_score == 0.0 and best_score >= 0.30 and len(one_line) >= 14:
             return (best_id, own_score, best_score)
         return None
 
