@@ -62,9 +62,9 @@ ai:
   one_line_soft_units: 50.0
   one_line_trim_target_units: 48.0
   # Overview line length controls, counted in plain characters.
-  summary_line_target_len: 96
-  summary_line_hard_len: 112
-  summary_line_soft_len: 132
+  summary_line_target_len: 120
+  summary_line_hard_len: 140
+  summary_line_soft_len: 168
   # Dump full model responses on failure.
   debug_dump_on_error: true
   # Dump every request/response pair. Prefer CLI flag --ai-debug for short-term debugging.

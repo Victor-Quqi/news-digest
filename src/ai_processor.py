@@ -1185,7 +1185,7 @@ class AIProcessor:
         max_id = max((item.id for item in articles), default=0)
         system_prompt = locale.render_prompt(
             "phase2",
-            "system_json",
+            "structured",
             summary_target=summary_target,
         )
         user_prompt = locale.render_prompt(
@@ -1229,7 +1229,7 @@ class AIProcessor:
         example_output = locale.get("prompts.phase2.example_output", '{"summaryLines":["..."]}')
         system_prompt = locale.render_prompt(
             "phase2",
-            "system_text",
+            "plain_text",
             summary_target=summary_target,
         )
         user_prompt = locale.render_prompt(

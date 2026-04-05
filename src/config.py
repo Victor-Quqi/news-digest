@@ -62,9 +62,9 @@ class AIConfig:
     one_line_hard_units: float = 42.0
     one_line_soft_units: float = 50.0
     one_line_trim_target_units: float = 48.0
-    summary_line_target_len: int = 96
-    summary_line_hard_len: int = 112
-    summary_line_soft_len: int = 132
+    summary_line_target_len: int = 120
+    summary_line_hard_len: int = 140
+    summary_line_soft_len: int = 168
     debug_dump_on_error: bool = True
     debug_dump_all: bool = False
     debug_dump_dir: str = "logs/ai-debug"
