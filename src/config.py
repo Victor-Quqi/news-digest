@@ -32,6 +32,14 @@ class ScheduleConfig:
 
 
 @dataclass
+class AIRetryTarget:
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+
+@dataclass
 class AIConfig:
     temperature: float = 0.3
     max_tokens: int = 4000
@@ -48,8 +56,12 @@ class AIConfig:
         default_factory=lambda: ["json_schema", "json_object"]
     )
     structured_output_phase2_policy: str = "strict"  # strict / prefer
-    transient_retry_max: int = 5
-    schema_retry_max: int = 5
+    transient_retry_max: int = 8
+    schema_retry_max: int = 8
+    retry_error_keywords: List[str] = field(default_factory=list)
+    retry_target_failure_threshold: int = 3
+    phase1_retry_targets: List[AIRetryTarget] = field(default_factory=list)
+    phase2_retry_targets: List[AIRetryTarget] = field(default_factory=list)
     backoff_seconds: List[int] = field(default_factory=lambda: [1, 2, 4])
     jitter_ms_max: int = 300
     taxonomy: List[str] = field(
@@ -184,9 +196,63 @@ def _to_bool(value: Any, fallback: bool) -> bool:
     return bool(value)
 
 
+def _validate_retry_target(target: AIRetryTarget, *, label: str, index: int) -> AIRetryTarget:
+    name = str(target.name or "").strip() or f"{label}-{index + 1}"
+    base_url = str(target.base_url or "").strip()
+    api_key = str(target.api_key or "").strip()
+    model = str(target.model or "").strip()
+
+    if not base_url:
+        raise ValueError(f"{label}[{index}] missing base_url")
+    if not api_key:
+        raise ValueError(f"{label}[{index}] missing api_key")
+    if not model:
+        raise ValueError(f"{label}[{index}] missing model")
+
+    return AIRetryTarget(
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+    )
+
+
+def _parse_retry_targets(
+    value: Any,
+    *,
+    label: str,
+    fallback: AIRetryTarget,
+) -> List[AIRetryTarget]:
+    if value in (None, ""):
+        items: List[Any] = [fallback]
+    elif isinstance(value, list):
+        items = value
+    else:
+        raise ValueError(f"{label} must be a list")
+
+    targets: List[AIRetryTarget] = []
+    for idx, item in enumerate(items):
+        if isinstance(item, AIRetryTarget):
+            target = item
+        elif isinstance(item, dict):
+            target = AIRetryTarget(
+                name=str(item.get("name", "") or "").strip(),
+                base_url=str(item.get("base_url", "") or "").strip(),
+                api_key=str(item.get("api_key", "") or "").strip(),
+                model=str(item.get("model", "") or "").strip(),
+            )
+        else:
+            raise ValueError(f"{label}[{idx}] must be an object")
+        targets.append(_validate_retry_target(target, label=label, index=idx))
+
+    if not targets:
+        raise ValueError(f"{label} must not be empty")
+    return targets
+
+
 def _load_env() -> EnvConfig:
     return EnvConfig(
-        openai_api_key=_required_env("OPENAI_API_KEY"),
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip(),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
         openai_use_env_proxy=_env_bool("OPENAI_USE_ENV_PROXY", False),
@@ -244,6 +310,22 @@ def load_config(
     ai_defaults = AIConfig()
     filter_defaults = FilterConfig()
     logging_defaults = LoggingConfig()
+    default_retry_target = AIRetryTarget(
+        name="primary",
+        base_url=env.openai_base_url,
+        api_key=env.openai_api_key,
+        model=env.openai_model,
+    )
+    phase1_retry_targets = _parse_retry_targets(
+        ai_cfg.get("phase1_retry_targets"),
+        label="ai.phase1_retry_targets",
+        fallback=default_retry_target,
+    )
+    phase2_retry_targets = _parse_retry_targets(
+        ai_cfg.get("phase2_retry_targets"),
+        label="ai.phase2_retry_targets",
+        fallback=default_retry_target,
+    )
 
     return AppConfig(
         rss_sources=sources,
@@ -279,6 +361,16 @@ def load_config(
             ).strip(),
             transient_retry_max=int(ai_cfg.get("transient_retry_max", ai_defaults.transient_retry_max)),
             schema_retry_max=int(ai_cfg.get("schema_retry_max", ai_defaults.schema_retry_max)),
+            retry_error_keywords=_to_string_list(
+                ai_cfg.get("retry_error_keywords", ai_defaults.retry_error_keywords),
+                ai_defaults.retry_error_keywords,
+            ),
+            retry_target_failure_threshold=max(
+                int(ai_cfg.get("retry_target_failure_threshold", ai_defaults.retry_target_failure_threshold)),
+                1,
+            ),
+            phase1_retry_targets=phase1_retry_targets,
+            phase2_retry_targets=phase2_retry_targets,
             backoff_seconds=_to_int_list(ai_cfg.get("backoff_seconds", ai_defaults.backoff_seconds), ai_defaults.backoff_seconds),
             jitter_ms_max=int(ai_cfg.get("jitter_ms_max", ai_defaults.jitter_ms_max)),
             taxonomy=_to_string_list(ai_cfg.get("taxonomy", ai_defaults.taxonomy), ai_defaults.taxonomy),

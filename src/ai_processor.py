@@ -14,7 +14,7 @@ import tiktoken
 from .ai_debug import AIDebugSink
 from .ai_transport import AITransport
 from .ai_processor_types import AIProcessingError
-from .config import AIConfig, EnvConfig
+from .config import AIConfig, AIRetryTarget, EnvConfig
 from .i18n import Locale
 from .models import CleanedArticle, ProcessedArticle, ProcessedResult
 from .utils import PipelineTimer, json_dumps
@@ -41,9 +41,10 @@ class AIProcessor:
         self._debug = AIDebugSink(ai_config, logger, capture_all=debug_capture_all)
         self._transport = AITransport(ai_config, env_config, logger, self._debug)
 
+        token_model = self._phase_targets("phase1")[0].model
         self.encoding = None
         try:
-            self.encoding = tiktoken.encoding_for_model(env_config.openai_model)
+            self.encoding = tiktoken.encoding_for_model(token_model)
         except Exception:
             try:
                 self.encoding = tiktoken.get_encoding("cl100k_base")
@@ -181,22 +182,27 @@ class AIProcessor:
         *,
         phase: str,
         log_label: str,
-        request_fn: Callable[[], Awaitable[Any]],
+        request_fn: Callable[[AIRetryTarget], Awaitable[Any]],
         validate_fn: Callable[[Any], _T],
         timer_api_label: str,
         timer_validate_label: str,
     ) -> _T:
+        targets = self._phase_targets(phase)
+        threshold = max(int(self.cfg.retry_target_failure_threshold), 1)
         schema_attempt = 0
-        transient_attempt = 0
+        call_attempt = 0
+        candidate_index = 0
+        candidate_failures = 0
         api_time = 0.0
         val_time = 0.0
 
         try:
             while True:
                 data: object = None
+                target = targets[candidate_index]
                 t0 = time.monotonic()
                 try:
-                    data = await request_fn()
+                    data = await request_fn(target)
                     api_time += time.monotonic() - t0
 
                     t0 = time.monotonic()
@@ -205,47 +211,150 @@ class AIProcessor:
                     return result
                 except (json.JSONDecodeError, ValueError) as exc:
                     val_time += time.monotonic() - t0
-                    schema_attempt += 1
+                    failure_count = candidate_failures + 1
                     self._dump_debug(
                         f"{phase}.schema_or_validation_error",
                         {
                             "attempt": schema_attempt,
+                            "target": self._target_payload(target),
+                            "candidate_failures": failure_count,
                             "error": str(exc),
                             "response_data": data,
                         },
                         force=True,
                     )
-                    if schema_attempt <= self.cfg.schema_retry_max:
-                        self.logger.warning(
-                            "%s schema/validation failed, retrying: attempt=%d, error=%s",
-                            log_label,
-                            schema_attempt,
-                            exc,
-                        )
-                        continue
-                    raise AIProcessingError(f"{phase} schema/validation failed: {exc}") from exc
+                    next_attempt = schema_attempt + 1
+                    if next_attempt > self.cfg.schema_retry_max:
+                        raise AIProcessingError(f"{phase} schema/validation failed: {exc}") from exc
+                    schema_attempt = next_attempt
+                    candidate_index, candidate_failures, switched = self._advance_retry_target_state(
+                        targets=targets,
+                        candidate_index=candidate_index,
+                        candidate_failures=candidate_failures,
+                    )
+                    self._log_retry(
+                        log_label=log_label,
+                        phase=phase,
+                        failure_kind="schema_or_validation",
+                        error=exc,
+                        target=target,
+                        candidate_failures=failure_count,
+                        candidate_threshold=threshold,
+                        attempt=schema_attempt,
+                        budget=self.cfg.schema_retry_max,
+                        switched=switched,
+                        next_target=targets[candidate_index],
+                    )
+                    continue
                 except Exception as exc:
+                    failure_count = candidate_failures + 1
                     self._dump_debug(
                         f"{phase}.call_error",
-                        {"error": str(exc), "response_data": data},
+                        {
+                            "target": self._target_payload(target),
+                            "candidate_failures": failure_count,
+                            "error": str(exc),
+                            "response_data": data,
+                        },
                         force=True,
                     )
-                    if self._is_transient_error(exc) and transient_attempt < self.cfg.transient_retry_max:
-                        delay = self._backoff_delay(transient_attempt)
-                        transient_attempt += 1
-                        self.logger.warning(
-                            "%s transient error, backing off: attempt=%d, delay=%.2fs, error=%s",
-                            log_label,
-                            transient_attempt,
-                            delay,
-                            exc,
-                        )
+                    if not self._should_retry_call_error(exc):
+                        raise AIProcessingError(f"{phase} call failed: {exc}") from exc
+                    next_attempt = call_attempt + 1
+                    if next_attempt > self.cfg.transient_retry_max:
+                        raise AIProcessingError(f"{phase} call failed: {exc}") from exc
+                    call_attempt = next_attempt
+                    delay = self._backoff_delay(call_attempt - 1) if self._is_transient_error(exc) else 0.0
+                    candidate_index, candidate_failures, switched = self._advance_retry_target_state(
+                        targets=targets,
+                        candidate_index=candidate_index,
+                        candidate_failures=candidate_failures,
+                    )
+                    self._log_retry(
+                        log_label=log_label,
+                        phase=phase,
+                        failure_kind="call",
+                        error=exc,
+                        target=target,
+                        candidate_failures=failure_count,
+                        candidate_threshold=threshold,
+                        attempt=call_attempt,
+                        budget=self.cfg.transient_retry_max,
+                        switched=switched,
+                        next_target=targets[candidate_index],
+                        delay=delay,
+                    )
+                    if delay > 0:
                         await asyncio.sleep(delay)
-                        continue
-                    raise AIProcessingError(f"{phase} call failed: {exc}") from exc
+                    continue
         finally:
             self._timer.record(timer_api_label, api_time)
             self._timer.record(timer_validate_label, val_time)
+
+    def _phase_targets(self, phase: str) -> List[AIRetryTarget]:
+        if phase == "phase1":
+            return list(self.cfg.phase1_retry_targets)
+        if phase == "phase2":
+            return list(self.cfg.phase2_retry_targets)
+        return list(self.cfg.phase2_retry_targets or self.cfg.phase1_retry_targets)
+
+    def _advance_retry_target_state(
+        self,
+        *,
+        targets: Sequence[AIRetryTarget],
+        candidate_index: int,
+        candidate_failures: int,
+    ) -> Tuple[int, int, bool]:
+        threshold = max(int(self.cfg.retry_target_failure_threshold), 1)
+        updated_failures = candidate_failures + 1
+        if updated_failures >= threshold and candidate_index < len(targets) - 1:
+            return candidate_index + 1, 0, True
+        return candidate_index, updated_failures, False
+
+    def _target_payload(self, target: AIRetryTarget) -> Dict[str, str]:
+        return {
+            "name": target.name,
+            "base_url": target.base_url,
+            "model": target.model,
+        }
+
+    def _log_retry(
+        self,
+        *,
+        log_label: str,
+        phase: str,
+        failure_kind: str,
+        error: Exception,
+        target: AIRetryTarget,
+        candidate_failures: int,
+        candidate_threshold: int,
+        attempt: int,
+        budget: int,
+        switched: bool,
+        next_target: AIRetryTarget,
+        delay: float = 0.0,
+    ) -> None:
+        self.logger.warning(
+            "%s retry scheduled: phase=%s, failure_kind=%s, attempt=%d/%d, "
+            "target=%s, model=%s, base_url=%s, candidate_failures=%d/%d, "
+            "next_target=%s, next_model=%s, next_base_url=%s, switched=%s, delay=%.2fs, error=%s",
+            log_label,
+            phase,
+            failure_kind,
+            attempt,
+            budget,
+            target.name,
+            target.model,
+            target.base_url,
+            candidate_failures,
+            candidate_threshold,
+            next_target.name,
+            next_target.model,
+            next_target.base_url,
+            switched,
+            delay,
+            error,
+        )
 
     def _apply_text_length_policy(
         self,
@@ -340,7 +449,7 @@ class AIProcessor:
         return await self._run_json_phase(
             phase="phase1",
             log_label="Phase 1",
-            request_fn=lambda: self._request_phase1(articles, locale=self.locale),
+            request_fn=lambda target: self._request_phase1(articles, locale=self.locale, target=target),
             validate_fn=lambda data: self._normalize_phase1_result(
                 data,
                 expected_ids=expected_ids,
@@ -355,7 +464,7 @@ class AIProcessor:
         return await self._run_json_phase(
             phase="phase2",
             log_label="Phase 2",
-            request_fn=lambda: self._request_phase2(articles, locale=self.locale),
+            request_fn=lambda target: self._request_phase2(articles, locale=self.locale, target=target),
             validate_fn=lambda data: self._postprocess_phase2_lines(
                 self._validate_phase2(data, valid_ids, locale=self.locale),
                 articles,
@@ -369,12 +478,17 @@ class AIProcessor:
         self, articles: List[ProcessedArticle]
     ) -> List[str]:
         valid_ids = {a.id for a in articles}
-        transient_attempt = 0
+        targets = self._phase_targets("phase2")
+        threshold = max(int(self.cfg.retry_target_failure_threshold), 1)
+        call_attempt = 0
+        candidate_index = 0
+        candidate_failures = 0
 
         while True:
             text = ""
+            target = targets[candidate_index]
             try:
-                text = await self._request_phase2_text(articles, locale=self.locale)
+                text = await self._request_phase2_text(articles, locale=self.locale, target=target)
                 raw_lines = self._coerce_summary_lines(text)
                 if not raw_lines:
                     raise ValueError("plain text overview is empty")
@@ -396,23 +510,46 @@ class AIProcessor:
                     locale=self.locale,
                 )
             except Exception as exc:
+                failure_count = candidate_failures + 1
                 self._dump_debug(
                     "phase2.text_fallback_error",
-                    {"error": str(exc), "response_text": text},
+                    {
+                        "target": self._target_payload(target),
+                        "candidate_failures": failure_count,
+                        "error": str(exc),
+                        "response_text": text,
+                    },
                     force=True,
                 )
-                if self._is_transient_error(exc) and transient_attempt < self.cfg.transient_retry_max:
-                    delay = self._backoff_delay(transient_attempt)
-                    transient_attempt += 1
-                    self.logger.warning(
-                        "Phase 2 text fallback transient error, backing off: attempt=%d, delay=%.2fs, error=%s",
-                        transient_attempt,
-                        delay,
-                        exc,
-                    )
+                if not self._should_retry_call_error(exc):
+                    raise AIProcessingError(f"Phase 2 text fallback failed: {exc}") from exc
+                next_attempt = call_attempt + 1
+                if next_attempt > self.cfg.transient_retry_max:
+                    raise AIProcessingError(f"Phase 2 text fallback failed: {exc}") from exc
+                call_attempt = next_attempt
+                delay = self._backoff_delay(call_attempt - 1) if self._is_transient_error(exc) else 0.0
+                candidate_index, candidate_failures, switched = self._advance_retry_target_state(
+                    targets=targets,
+                    candidate_index=candidate_index,
+                    candidate_failures=candidate_failures,
+                )
+                self._log_retry(
+                    log_label="Phase 2 text fallback",
+                    phase="phase2",
+                    failure_kind="text_fallback",
+                    error=exc,
+                    target=target,
+                    candidate_failures=failure_count,
+                    candidate_threshold=threshold,
+                    attempt=call_attempt,
+                    budget=self.cfg.transient_retry_max,
+                    switched=switched,
+                    next_target=targets[candidate_index],
+                    delay=delay,
+                )
+                if delay > 0:
                     await asyncio.sleep(delay)
-                    continue
-                raise AIProcessingError(f"Phase 2 text fallback failed: {exc}") from exc
+                continue
 
     def _validate_phase1(
         self,
@@ -653,8 +790,6 @@ class AIProcessor:
             for keyword in (
                 "timeout",
                 "connection",
-                "empty content",
-                "empty response",
                 "temporar",
                 "rate limit",
                 "too many requests",
@@ -663,6 +798,18 @@ class AIProcessor:
                 "502",
             )
         )
+
+    def _should_retry_call_error(self, exc: Exception) -> bool:
+        if self._is_transient_error(exc):
+            return True
+
+        name = exc.__class__.__name__.lower()
+        msg = str(exc).lower()
+        for keyword in self.cfg.retry_error_keywords:
+            normalized = str(keyword or "").strip().lower()
+            if normalized and (normalized in name or normalized in msg):
+                return True
+        return False
 
     def _backoff_delay(self, attempt: int) -> float:
         idx = min(attempt, max(len(self.cfg.backoff_seconds) - 1, 0))
@@ -1108,6 +1255,7 @@ class AIProcessor:
         self,
         articles: List[CleanedArticle],
         locale: Locale,
+        target: AIRetryTarget,
     ) -> Dict[str, Any]:
         taxonomy = locale.taxonomy or self.cfg.taxonomy
         taxonomy_separator = ", " if locale.lang.lower().startswith("en") else "、"
@@ -1161,7 +1309,13 @@ class AIProcessor:
             "required": ["perArticle"],
         }
 
-        raw = await self._transport.request_json(system_prompt, user_prompt, schema, "phase1")
+        raw = await self._transport.request_json(
+            system_prompt,
+            user_prompt,
+            schema,
+            "phase1",
+            target=target,
+        )
         if not isinstance(raw, dict):
             raise ValueError("Phase 1 output is not a JSON object")
         return raw
@@ -1170,6 +1324,7 @@ class AIProcessor:
         self,
         articles: List[ProcessedArticle],
         locale: Locale,
+        target: AIRetryTarget,
     ) -> Any:
         summary_target = int(self._summary_line_target_len)
         user_payload = [
@@ -1209,12 +1364,19 @@ class AIProcessor:
             },
             "required": ["summaryLines"],
         }
-        return await self._transport.request_json(system_prompt, user_prompt, schema, "phase2")
+        return await self._transport.request_json(
+            system_prompt,
+            user_prompt,
+            schema,
+            "phase2",
+            target=target,
+        )
 
     async def _request_phase2_text(
         self,
         articles: List[ProcessedArticle],
         locale: Locale,
+        target: AIRetryTarget,
     ) -> str:
         summary_target = int(self._summary_line_target_len)
         user_payload = [
@@ -1246,7 +1408,7 @@ class AIProcessor:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return await self._transport.chat(messages, response_format=None)
+        return await self._transport.chat(messages, response_format=None, target=target)
 
 
 __all__ = ["AIProcessingError", "AIProcessor"]

@@ -47,6 +47,14 @@ class ExampleConfigSmokeTest(unittest.TestCase):
 
         self.assertEqual(cfg.locale, "zh")
         self.assertEqual(len(cfg.rss_sources), 2)
+        self.assertEqual(cfg.ai.transient_retry_max, 8)
+        self.assertEqual(cfg.ai.schema_retry_max, 8)
+        self.assertEqual(cfg.ai.retry_error_keywords, [])
+        self.assertEqual(cfg.ai.retry_target_failure_threshold, 3)
+        self.assertEqual(len(cfg.ai.phase1_retry_targets), 1)
+        self.assertEqual(cfg.ai.phase1_retry_targets[0].name, "primary")
+        self.assertEqual(len(cfg.ai.phase2_retry_targets), 1)
+        self.assertEqual(cfg.ai.phase2_retry_targets[0].model, cfg.env.openai_model)
         self.assertIn("Example overview", html)
         self.assertIn("https://example.com/article", html)
 

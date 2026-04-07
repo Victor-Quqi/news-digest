@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 
 from .ai_debug import AIDebugSink
 from .ai_processor_types import AIProcessingError
-from .config import AIConfig, EnvConfig
+from .config import AIConfig, AIRetryTarget, EnvConfig
 
 
 class AITransport:
@@ -22,7 +22,6 @@ class AITransport:
         debug_sink: AIDebugSink,
     ) -> None:
         self._cfg = ai_config
-        self._model = env_config.openai_model
         self._logger = logger
         self._debug = debug_sink
 
@@ -34,12 +33,7 @@ class AITransport:
             trust_env=env_config.openai_use_env_proxy,
             event_hooks={"request": [_rewrite_ua]},
         )
-        self._client = AsyncOpenAI(
-            api_key=env_config.openai_api_key,
-            base_url=env_config.openai_base_url,
-            timeout=ai_config.timeout,
-            http_client=self._http_client,
-        )
+        self._clients: Dict[Tuple[str, str], AsyncOpenAI] = {}
 
     async def aclose(self) -> None:
         try:
@@ -53,6 +47,8 @@ class AITransport:
         user_prompt: str,
         schema: Dict[str, Any],
         phase: str,
+        *,
+        target: AIRetryTarget,
     ) -> Any:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -74,18 +70,20 @@ class AITransport:
                     "request_json.start",
                     {
                         "phase": phase,
+                        "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
                         "required_keys": list(required_keys),
                         "messages": messages,
                     },
                 )
-                text = await self.chat(messages, response_format=response_format)
+                text = await self.chat(messages, response_format=response_format, target=target)
                 parsed = self.parse_json_text(text, required_keys=required_keys)
                 self._debug.dump(
                     "request_json.success",
                     {
                         "phase": phase,
+                        "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
                         "response_text": text,
@@ -99,6 +97,7 @@ class AITransport:
                     "request_json.error",
                     {
                         "phase": phase,
+                        "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
                         "error": str(exc),
@@ -130,18 +129,20 @@ class AITransport:
                 "request_json.start",
                 {
                     "phase": phase,
+                    "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
                     "required_keys": list(required_keys),
                     "messages": messages,
                 },
             )
-            text = await self.chat(messages, response_format=None)
+            text = await self.chat(messages, response_format=None, target=target)
             parsed = self.parse_json_text(text, required_keys=required_keys)
             self._debug.dump(
                 "request_json.success",
                 {
                     "phase": phase,
+                    "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
                     "response_text": text,
@@ -154,6 +155,7 @@ class AITransport:
                 "request_json.error",
                 {
                     "phase": phase,
+                    "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
                     "error": str(exc),
@@ -168,9 +170,10 @@ class AITransport:
         messages: List[Dict[str, str]],
         *,
         response_format: Dict[str, Any] | None,
+        target: AIRetryTarget,
     ) -> str:
         kwargs: Dict[str, Any] = {
-            "model": self._model,
+            "model": target.model,
             "messages": messages,
             "temperature": self._cfg.temperature,
             "max_tokens": self._cfg.max_tokens,
@@ -181,7 +184,8 @@ class AITransport:
         self._debug.dump(
             "chat.request",
             {
-                "model": self._model,
+                "target": self._target_payload(target),
+                "model": target.model,
                 "temperature": self._cfg.temperature,
                 "max_tokens": self._cfg.max_tokens,
                 "response_format": response_format,
@@ -190,12 +194,14 @@ class AITransport:
         )
         response: Any = None
         try:
-            response = await self._client.chat.completions.create(**kwargs)
+            client = self._client_for_target(target)
+            response = await client.chat.completions.create(**kwargs)
             content = self.extract_chat_content(response)
             if not content:
                 self._debug.dump(
                     "chat.empty_content",
                     {
+                        "target": self._target_payload(target),
                         "response_format": response_format,
                         "response_summary": self._response_summary(response),
                         "raw_response": self._response_debug_payload(response),
@@ -206,6 +212,7 @@ class AITransport:
             self._debug.dump(
                 "chat.response",
                 {
+                    "target": self._target_payload(target),
                     "response_format": response_format,
                     "content": content,
                     "response_summary": self._response_summary(response),
@@ -216,6 +223,7 @@ class AITransport:
             self._debug.dump(
                 "chat.error",
                 {
+                    "target": self._target_payload(target),
                     "response_format": response_format,
                     "error": str(exc),
                     "response_summary": self._response_summary(response),
@@ -224,6 +232,26 @@ class AITransport:
                 force=True,
             )
             raise
+
+    def _client_for_target(self, target: AIRetryTarget) -> AsyncOpenAI:
+        key = (target.base_url, target.api_key)
+        client = self._clients.get(key)
+        if client is None:
+            client = AsyncOpenAI(
+                api_key=target.api_key,
+                base_url=target.base_url,
+                timeout=self._cfg.timeout,
+                http_client=self._http_client,
+            )
+            self._clients[key] = client
+        return client
+
+    def _target_payload(self, target: AIRetryTarget) -> Dict[str, Any]:
+        return {
+            "name": target.name,
+            "base_url": target.base_url,
+            "model": target.model,
+        }
 
     def extract_chat_content(self, response: Any) -> str:
         if response is None:

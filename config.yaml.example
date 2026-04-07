@@ -40,9 +40,33 @@ ai:
   # Same policy semantics as phase 1.
   structured_output_phase2_policy: strict
   # Retries for transient transport / rate-limit / timeout failures.
-  transient_retry_max: 5
+  transient_retry_max: 8
   # Retries for invalid JSON or schema / business-rule validation failures.
-  schema_retry_max: 5
+  schema_retry_max: 8
+  # Extra non-transient error keywords that should still be retried if they appear in the exception.
+  retry_error_keywords: []
+  # Switch to the next retry target after the current target fails this many times.
+  retry_target_failure_threshold: 3
+  # Retry targets used by phase 1. Add more items to switch upstream/model on repeated failures.
+  phase1_retry_targets:
+    - name: primary
+      base_url: ${OPENAI_BASE_URL}
+      api_key: ${OPENAI_API_KEY}
+      model: ${OPENAI_MODEL}
+    # - name: backup
+    #   base_url: ${OPENAI_BACKUP_BASE_URL}
+    #   api_key: ${OPENAI_BACKUP_API_KEY}
+    #   model: ${OPENAI_BACKUP_MODEL}
+  # Retry targets used by phase 2. You can keep them the same as phase 1 or tune separately.
+  phase2_retry_targets:
+    - name: primary
+      base_url: ${OPENAI_BASE_URL}
+      api_key: ${OPENAI_API_KEY}
+      model: ${OPENAI_MODEL}
+    # - name: backup
+    #   base_url: ${OPENAI_BACKUP_BASE_URL}
+    #   api_key: ${OPENAI_BACKUP_API_KEY}
+    #   model: ${OPENAI_BACKUP_MODEL}
   # Base backoff schedule, in seconds, reused by retry logic.
   backoff_seconds: [1, 2, 4]
   # Extra random jitter added to retries, in milliseconds.
