@@ -127,6 +127,22 @@ class AIDebugSink:
     def _to_jsonable(self, data: Any) -> Any:
         if data is None or isinstance(data, (str, int, float, bool)):
             return data
+        model_dump = getattr(data, "model_dump", None)
+        if callable(model_dump):
+            try:
+                dumped = model_dump()
+            except Exception:
+                dumped = None
+            if dumped is not None:
+                return self._to_jsonable(dumped)
+        to_dict = getattr(data, "to_dict", None)
+        if callable(to_dict):
+            try:
+                dumped = to_dict()
+            except Exception:
+                dumped = None
+            if dumped is not None:
+                return self._to_jsonable(dumped)
         if isinstance(data, dict):
             return {str(key): self._to_jsonable(value) for key, value in data.items()}
         if isinstance(data, (list, tuple, set)):

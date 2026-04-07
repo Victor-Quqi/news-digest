@@ -653,6 +653,8 @@ class AIProcessor:
             for keyword in (
                 "timeout",
                 "connection",
+                "empty content",
+                "empty response",
                 "temporar",
                 "rate limit",
                 "too many requests",

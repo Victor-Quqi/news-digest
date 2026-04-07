@@ -180,7 +180,13 @@ class AITransport:
 
         self._debug.dump(
             "chat.request",
-            {"response_format": response_format, "messages": messages},
+            {
+                "model": self._model,
+                "temperature": self._cfg.temperature,
+                "max_tokens": self._cfg.max_tokens,
+                "response_format": response_format,
+                "messages": messages,
+            },
         )
         response: Any = None
         try:
@@ -191,14 +197,19 @@ class AITransport:
                     "chat.empty_content",
                     {
                         "response_format": response_format,
-                        "raw_response": str(response),
+                        "response_summary": self._response_summary(response),
+                        "raw_response": self._response_debug_payload(response),
                     },
                     force=True,
                 )
                 raise ValueError("Model returned empty content")
             self._debug.dump(
                 "chat.response",
-                {"response_format": response_format, "content": content},
+                {
+                    "response_format": response_format,
+                    "content": content,
+                    "response_summary": self._response_summary(response),
+                },
             )
             return content
         except Exception as exc:
@@ -207,7 +218,8 @@ class AITransport:
                 {
                     "response_format": response_format,
                     "error": str(exc),
-                    "raw_response": str(response) if response is not None else "",
+                    "response_summary": self._response_summary(response),
+                    "raw_response": self._response_debug_payload(response),
                 },
                 force=True,
             )
@@ -228,6 +240,7 @@ class AITransport:
             direct = self.extract_chat_content_from_dict(response)
             if direct:
                 return direct
+            return ""
 
         choices = getattr(response, "choices", None)
         if isinstance(choices, list) and choices:
@@ -236,6 +249,7 @@ class AITransport:
                 direct = self.extract_chat_content_from_dict({"choices": [first]})
                 if direct:
                     return direct
+                return ""
             else:
                 message = getattr(first, "message", None)
                 if message is not None:
@@ -248,6 +262,7 @@ class AITransport:
                     joined = self._join_content_parts(getattr(delta, "content", None))
                     if joined:
                         return joined
+                return ""
 
         model_dump = getattr(response, "model_dump", None)
         if callable(model_dump):
@@ -256,6 +271,7 @@ class AITransport:
                 direct = self.extract_chat_content_from_dict(dumped)
                 if direct:
                     return direct
+                return ""
             except Exception:
                 pass
 
@@ -488,6 +504,98 @@ class AITransport:
                 chunks.append(content)
 
         return "".join(chunks).strip()
+
+    def _response_debug_payload(self, response: Any) -> Any:
+        if response is None:
+            return None
+        model_dump = getattr(response, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return model_dump()
+            except Exception:
+                pass
+        if isinstance(response, dict):
+            return response
+        return str(response)
+
+    def _response_summary(self, response: Any) -> Dict[str, Any]:
+        if response is None:
+            return {}
+
+        payload = self._response_debug_payload(response)
+        if not isinstance(payload, dict):
+            return {
+                "python_type": type(response).__name__,
+                "preview": str(payload)[:2000],
+            }
+
+        choices = payload.get("choices")
+        choice_summaries: List[Dict[str, Any]] = []
+        if isinstance(choices, list):
+            for item in choices[:3]:
+                if not isinstance(item, dict):
+                    continue
+                message = item.get("message")
+                delta = item.get("delta")
+                choice_summaries.append(
+                    {
+                        "index": item.get("index"),
+                        "finish_reason": item.get("finish_reason"),
+                        "message": self._message_summary(message),
+                        "delta": self._message_summary(delta),
+                    }
+                )
+
+        summary: Dict[str, Any] = {
+            "python_type": type(response).__name__,
+            "object": payload.get("object"),
+            "id": payload.get("id"),
+            "model": payload.get("model"),
+            "system_fingerprint": payload.get("system_fingerprint"),
+            "service_tier": payload.get("service_tier"),
+            "usage": payload.get("usage"),
+            "choices": choice_summaries,
+        }
+
+        error = payload.get("error")
+        if error is not None:
+            summary["error"] = error
+
+        extra_keys = [
+            key
+            for key in ("output", "response", "data", "result")
+            if key in payload
+        ]
+        if extra_keys:
+            summary["extra_top_level_keys"] = extra_keys
+        return summary
+
+    def _message_summary(self, message: Any) -> Dict[str, Any] | None:
+        if message is None:
+            return None
+        if not isinstance(message, dict):
+            model_dump = getattr(message, "model_dump", None)
+            if callable(model_dump):
+                try:
+                    message = model_dump()
+                except Exception:
+                    return {"python_type": type(message).__name__, "preview": str(message)[:1000]}
+            else:
+                return {"python_type": type(message).__name__, "preview": str(message)[:1000]}
+        if not isinstance(message, dict):
+            return {"preview": str(message)[:1000]}
+
+        content = message.get("content")
+        content_text = self._join_content_parts(content)
+        return {
+            "role": message.get("role"),
+            "content_type": type(content).__name__ if content is not None else None,
+            "content_preview": content_text[:1000] if content_text else "",
+            "refusal": message.get("refusal"),
+            "tool_calls": message.get("tool_calls"),
+            "function_call": message.get("function_call"),
+            "annotations": message.get("annotations"),
+        }
 
 
 def _extract_json_fence(payload: str) -> str:
