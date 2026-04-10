@@ -42,7 +42,7 @@ def _parse_date_str(value: str) -> datetime | None:
         return None
 
 
-def _parse_entry_date(entry: feedparser.FeedParserDict) -> datetime:
+def _parse_entry_date(entry: feedparser.FeedParserDict) -> datetime | None:
     for parsed_key in ("published_parsed", "updated_parsed", "created_parsed"):
         parsed = entry.get(parsed_key)
         if parsed:
@@ -54,7 +54,7 @@ def _parse_entry_date(entry: feedparser.FeedParserDict) -> datetime:
         if dt:
             return dt
 
-    return datetime.now(timezone.utc)
+    return None
 
 
 def _extract_content(entry: feedparser.FeedParserDict) -> str:
@@ -75,6 +75,7 @@ async def _fetch_single_source(
     source: RSSSource,
     logger: logging.Logger,
     timer: PipelineTimer,
+    missing_pub_date_strict: bool,
     timeout_seconds: int = 20,
     max_retry: int = 3,
     retry_interval_seconds: int = 5,
@@ -97,11 +98,26 @@ async def _fetch_single_source(
                     content = _extract_content(entry)
                     if not title or not link:
                         continue
+                    pub_date = _parse_entry_date(entry)
+                    if pub_date is None:
+                        if missing_pub_date_strict:
+                            logger.warning(
+                                "RSS entry missing publish time, dropping item: source=%s, title=%s",
+                                source.name,
+                                title,
+                            )
+                            continue
+                        pub_date = datetime.now(timezone.utc)
+                        logger.warning(
+                            "RSS entry missing publish time, using current time: source=%s, title=%s",
+                            source.name,
+                            title,
+                        )
                     items.append(
                         Article(
                             title=title,
                             link=link,
-                            pub_date=_parse_entry_date(entry),
+                            pub_date=pub_date,
                             content=content,
                             source=source.name,
                         )
@@ -130,6 +146,7 @@ async def fetch_all_rss(
     sources: List[RSSSource],
     logger: logging.Logger,
     *,
+    missing_pub_date_strict: bool = True,
     timer: PipelineTimer | None = None,
 ) -> List[Article]:
     if not sources:
@@ -139,7 +156,16 @@ async def fetch_all_rss(
         timer = PipelineTimer(enabled=False)
 
     async with aiohttp.ClientSession() as session:
-        tasks = [_fetch_single_source(session, source, logger, timer) for source in sources]
+        tasks = [
+            _fetch_single_source(
+                session,
+                source,
+                logger,
+                timer,
+                missing_pub_date_strict=missing_pub_date_strict,
+            )
+            for source in sources
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_articles: List[Article] = []

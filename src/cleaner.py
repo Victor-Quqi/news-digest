@@ -23,6 +23,17 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
+def _truncate_content_keep_head_tail(text: str, max_length: int) -> str:
+    content = str(text or "").strip()
+    if max_length <= 0 or len(content) <= max_length:
+        return content
+    head_length = max(max_length // 2, 1)
+    tail_length = max(max_length - head_length - 1, 0)
+    if tail_length <= 0:
+        return content[:max_length]
+    return f"{content[:head_length].rstrip()}…{content[-tail_length:].lstrip()}"
+
+
 def _title_fingerprint(title: str) -> str:
     base = normalize_title_key(title)
     # Strip separators to reduce dedup misses from punctuation variants
@@ -104,7 +115,7 @@ def _dedupe_articles(articles: List[Article]) -> List[Article]:
     for article in best_by_title.values():
         merged[id(article)] = article
 
-    # Phase 2: fuzzy title dedup (cross-source same article, minor title rewrites)
+    # Fuzzy title dedup: cross-source same article, minor title rewrites
     candidates = list(merged.values())
     deduped: List[Article] = []
     for item in candidates:
@@ -159,7 +170,7 @@ def clean_articles(
                     title=(item.title or "").strip(),
                     link=(item.link or "").strip(),
                     pub_date=pub_date_local,
-                    content=cleaned_content[:max_content_length],
+                    content=_truncate_content_keep_head_tail(cleaned_content, max_content_length),
                     source=(item.source or "").strip(),
                 )
             )

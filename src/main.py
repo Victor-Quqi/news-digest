@@ -60,7 +60,12 @@ async def run_once(
     logger.info("Pipeline started")
 
     async with timer.async_stage("RSS fetch"):
-        raw_articles = await fetch_all_rss(cfg.rss_sources, logger, timer=timer)
+        raw_articles = await fetch_all_rss(
+            cfg.rss_sources,
+            logger,
+            missing_pub_date_strict=cfg.filter.rss_missing_pub_date_strict,
+            timer=timer,
+        )
 
     with timer.stage("Clean"):
         cleaned_articles = clean_articles(
