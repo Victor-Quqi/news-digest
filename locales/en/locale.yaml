@@ -2,6 +2,10 @@ email_subject: "Daily News Digest"
 
 prompts:
   summarization:
+    example_output: |-
+      {{
+        "perArticle":[{{"id":1,"oneLine":"..."}}]
+      }}
     system: |-
       Task: output oneLine for each news item.
       oneLine: a single concise English line, clear and specific, keeping only the core information.
@@ -14,6 +18,35 @@ prompts:
 
       articles={articles_json}
   categorization:
+    example_output: |-
+      {{
+        "perArticle":[{{"id":1,"category":"..."}}]
+      }}
+    category_language_instruction: "Category labels must be written in English."
+    instructions:
+      already_used_categories: "already_used_categories lists labels that earlier shards have already used; if one still fits, reuse it to keep the whole run consistent.\n"
+    policies:
+      with_candidates: |-
+        Prefer using labels directly from {category_candidates_name}.
+        Only create a new category when none of the labels in {category_candidates_name} fit.
+        A new category should be short and generic, like a section name.
+        Usually keep it to 1-3 words.
+        Keep the total category count under {max_categories} when possible.
+      with_candidates_and_used: |-
+        Prefer using labels directly from {category_candidates_name}.
+        If an already used category still fits, reuse it.
+        Only create a new category when none of the labels in {category_candidates_name} fit.
+        A new category should be short and generic, like a section name.
+        Usually keep it to 1-3 words.
+        Keep the total category count under {max_categories} when possible.
+      without_candidates: |-
+        Categories must be short and generic, like section names.
+        Reuse an existing category when it still fits. Only create a new one when the existing categories clearly do not fit.
+        Usually keep labels to 1-3 words.
+        Keep the total category count under {max_categories} when possible.
+    blocks:
+      category_candidates: "{category_candidates_name}={category_candidates_json}\n"
+      already_used_categories: "already_used_categories={used_categories_json}\n"
     system: |-
       Task: output exactly one category for each news item.
       Use the title and short content excerpt to judge the category.
@@ -29,6 +62,26 @@ prompts:
 
       articles={articles_json}
   category_suggestion:
+    example_output: |-
+      {{
+        "categories":["World","Markets","Tech"]
+      }}
+    category_language_instruction: "Category labels must be written in English."
+    instructions:
+      existing_categories: "existing_categories lists labels that earlier shards have already produced; if one still fits, reuse it to keep the whole run consistent.\n"
+    policies:
+      with_existing: |-
+        If an existing category still fits, reuse it.
+        Categories must be short and generic, like section names.
+        Usually keep labels to 1-3 words.
+        Keep the total category count under {max_categories} when possible.
+      without_existing: |-
+        Only keep the main recurring themes of this batch.
+        Categories must be short and generic, like section names.
+        Usually keep labels to 1-3 words.
+        Keep the total category count under {max_categories} when possible.
+    blocks:
+      existing_categories: "existing_categories={existing_categories_json}\n"
     system: |-
       Task: propose a compact set of categories for this batch of news.
       Use the title and short content excerpt.

@@ -127,11 +127,14 @@ class Locale:
     def email_subject(self) -> str:
         return str(self.get("email_subject", ""))
 
-    def get_prompt(self, step: str, role: str) -> str:
-        value = self.get(f"prompts.{step}.{role}", _MISSING)
+    def require(self, dotted_key: str) -> Any:
+        value = self.get(dotted_key, _MISSING)
         if value is _MISSING:
-            raise KeyError(f"Prompt not found: step={step}, role={role}")
-        return str(value)
+            raise KeyError(f"Locale key not found: {dotted_key}")
+        return value
+
+    def get_prompt(self, step: str, role: str) -> str:
+        return str(self.require(f"prompts.{step}.{role}"))
 
     def render_prompt(self, step: str, role: str, **kwargs: Any) -> str:
         return self.get_prompt(step, role).format(**kwargs)

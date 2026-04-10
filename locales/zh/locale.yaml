@@ -2,6 +2,10 @@ email_subject: "新闻日报"
 
 prompts:
   summarization:
+    example_output: |-
+      {{
+        "perArticle":[{{"id":1,"oneLine":"..."}}]
+      }}
     system: |-
       任务：为每篇新闻输出 oneLine。
       oneLine：中文单行，简洁明确，只保留核心信息。
@@ -14,6 +18,35 @@ prompts:
 
       articles={articles_json}
   categorization:
+    example_output: |-
+      {{
+        "perArticle":[{{"id":1,"category":"..."}}]
+      }}
+    category_language_instruction: "分类名尽量用中文；AI、IPO、ETF 等常见缩写可保留。"
+    instructions:
+      already_used_categories: "already_used_categories 是前面分片已经用过的分类名；如果仍然贴切，优先复用以保持整批一致。\n"
+    policies:
+      with_candidates: |-
+        优先直接使用 {category_candidates_name} 里的分类名。
+        只有当 {category_candidates_name} 都不贴切时，才允许新建分类。
+        新建分类也要简短、通用，像栏目名。
+        最好 2~4 字，必要时可稍长。
+        本批分类总数尽量少于 {max_categories} 个。
+      with_candidates_and_used: |-
+        优先直接使用 {category_candidates_name} 里的分类名。
+        如果已有分类仍然贴切，优先复用已有分类。
+        只有当 {category_candidates_name} 都不贴切时，才允许新建分类。
+        新建分类也要简短、通用，像栏目名。
+        最好 2~4 字，必要时可稍长。
+        本批分类总数尽量少于 {max_categories} 个。
+      without_candidates: |-
+        分类名必须简短、通用，像栏目名。
+        如果已有分类仍然贴切，优先复用；只有明显放不进去时才新建。
+        最好 2~4 字，必要时可稍长。
+        本批分类总数尽量少于 {max_categories} 个。
+    blocks:
+      category_candidates: "{category_candidates_name}={category_candidates_json}\n"
+      already_used_categories: "already_used_categories={used_categories_json}\n"
     system: |-
       任务：为每篇新闻输出 1 个 category。
       可参考标题和正文片段判断。
@@ -29,6 +62,26 @@ prompts:
 
       articles={articles_json}
   category_suggestion:
+    example_output: |-
+      {{
+        "categories":["国际","财经","科技"]
+      }}
+    category_language_instruction: "分类名尽量用中文；AI、IPO、ETF 等常见缩写可保留。"
+    instructions:
+      existing_categories: "existing_categories 是前面分片已经产出的分类名；如果仍然贴切，优先复用以保持整批一致。\n"
+    policies:
+      with_existing: |-
+        如果已有分类仍然贴切，优先复用。
+        分类名必须简短、通用，像栏目名。
+        最好 2~4 字，必要时可稍长。
+        本批分类总数尽量少于 {max_categories} 个。
+      without_existing: |-
+        只保留这一批新闻里反复出现的主线。
+        分类名必须简短、通用，像栏目名。
+        最好 2~4 字，必要时可稍长。
+        本批分类总数尽量少于 {max_categories} 个。
+    blocks:
+      existing_categories: "existing_categories={existing_categories_json}\n"
     system: |-
       任务：先为这一批新闻提炼一组建议分类。
       参考标题和短正文片段。
