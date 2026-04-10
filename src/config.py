@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
@@ -48,27 +49,26 @@ class AIConfig:
     shard_threshold_ratio: float = 0.6
     shard_max_articles: int = 35
     shard_max_chars: int = 120000
-    structured_output_phase1_formats: List[str] = field(
+    structured_output_summarization_formats: List[str] = field(
         default_factory=lambda: ["json_schema", "json_object"]
     )
-    structured_output_phase1_policy: str = "strict"  # strict / prefer
-    structured_output_phase2_formats: List[str] = field(
+    structured_output_summarization_policy: str = "strict"  # strict / prefer
+    structured_output_overview_formats: List[str] = field(
         default_factory=lambda: ["json_schema", "json_object"]
     )
-    structured_output_phase2_policy: str = "strict"  # strict / prefer
+    structured_output_overview_policy: str = "strict"  # strict / prefer
     transient_retry_max: int = 8
     schema_retry_max: int = 8
     retry_error_keywords: List[str] = field(default_factory=list)
     retry_target_failure_threshold: int = 3
-    phase1_retry_targets: List[AIRetryTarget] = field(default_factory=list)
-    phase2_retry_targets: List[AIRetryTarget] = field(default_factory=list)
+    summarization_retry_targets: List[AIRetryTarget] = field(default_factory=list)
+    overview_retry_targets: List[AIRetryTarget] = field(default_factory=list)
     backoff_seconds: List[int] = field(default_factory=lambda: [1, 2, 4])
     jitter_ms_max: int = 300
-    taxonomy: List[str] = field(
-        default_factory=lambda: ["Tech", "Finance", "Policy", "Market", "International", "Other"]
-    )
-    phase2_text_fallback: bool = False
-    phase2_local_fallback: bool = False
+    preferred_categories: List[str] = field(default_factory=list)
+    categorization_strict: bool = True
+    overview_text_fallback: bool = False
+    overview_local_fallback: bool = False
     fallback_send_raw_email: bool = False
     fallback_warning_text: str = "⚠ AI summarization/categorization failed. This email is a degraded raw-article version."
     one_line_hard_units: float = 42.0
@@ -89,6 +89,7 @@ class AIConfig:
 class FilterConfig:
     hours_back: int = 24
     max_content_length: int = 6000
+    rss_missing_pub_date_strict: bool = True
 
 
 @dataclass
@@ -121,6 +122,9 @@ class AppConfig:
     logging: LoggingConfig
     env: EnvConfig
     locale: str
+
+
+_logger = logging.getLogger(__name__)
 
 
 def _replace_env_in_string(value: str) -> str:
@@ -168,6 +172,16 @@ def _to_string_list(value: Any, fallback: List[str]) -> List[str]:
     if isinstance(value, list):
         parts = [str(x).strip() for x in value if str(x).strip()]
         return parts or list(fallback)
+    return list(fallback)
+
+
+def _to_optional_string_list(value: Any, fallback: List[str]) -> List[str]:
+    if value is None:
+        return list(fallback)
+    if isinstance(value, str):
+        return [x.strip() for x in value.split(",") if x.strip()]
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
     return list(fallback)
 
 
@@ -279,7 +293,7 @@ def load_config(
         raw: Dict[str, Any] = yaml.safe_load(f) or {}
 
     resolved = _replace_env(raw)
-    locale = str(raw.get("locale", resolved.get("locale", "zh")) or "zh").strip() or "zh"
+    locale = str(resolved.get("locale", "zh") or "zh").strip() or "zh"
     env = _load_env()
 
     # Load RSS sources from separate file (sources.yaml)
@@ -292,11 +306,20 @@ def load_config(
         raw_sources: Any = yaml.safe_load(f) or []
     resolved_sources = _replace_env(raw_sources)
 
-    sources = [
-        RSSSource(url=item["url"], name=item["name"])
-        for item in resolved_sources
-        if isinstance(item, dict) and item.get("url") and item.get("name")
-    ]
+    sources: List[RSSSource] = []
+    for index, item in enumerate(resolved_sources):
+        if not isinstance(item, dict):
+            _logger.warning("Skipping invalid RSS source at index %d: item must be an object", index)
+            continue
+        url = str(item.get("url", "") or "").strip()
+        name = str(item.get("name", "") or "").strip()
+        if not url or not name:
+            _logger.warning(
+                "Skipping invalid RSS source at index %d: missing url or name",
+                index,
+            )
+            continue
+        sources.append(RSSSource(url=url, name=name))
     if not sources:
         raise ValueError("sources.yaml must not be empty")
 
@@ -316,14 +339,14 @@ def load_config(
         api_key=env.openai_api_key,
         model=env.openai_model,
     )
-    phase1_retry_targets = _parse_retry_targets(
-        ai_cfg.get("phase1_retry_targets"),
-        label="ai.phase1_retry_targets",
+    summarization_retry_targets = _parse_retry_targets(
+        ai_cfg.get("summarization_retry_targets"),
+        label="ai.summarization_retry_targets",
         fallback=default_retry_target,
     )
-    phase2_retry_targets = _parse_retry_targets(
-        ai_cfg.get("phase2_retry_targets"),
-        label="ai.phase2_retry_targets",
+    overview_retry_targets = _parse_retry_targets(
+        ai_cfg.get("overview_retry_targets"),
+        label="ai.overview_retry_targets",
         fallback=default_retry_target,
     )
 
@@ -331,7 +354,7 @@ def load_config(
         rss_sources=sources,
         email=EmailConfig(
             recipients=_to_string_list(email_cfg.get("to", email_defaults.recipients), email_defaults.recipients),
-            subject=str(email_cfg.get("subject", email_defaults.subject)),
+            subject=str(email_cfg.get("subject", "") or "").strip(),
         ),
         schedule=ScheduleConfig(
             cron=str(schedule_cfg.get("cron", schedule_defaults.cron)),
@@ -345,19 +368,19 @@ def load_config(
             shard_threshold_ratio=float(ai_cfg.get("shard_threshold_ratio", ai_defaults.shard_threshold_ratio)),
             shard_max_articles=int(ai_cfg.get("shard_max_articles", ai_defaults.shard_max_articles)),
             shard_max_chars=int(ai_cfg.get("shard_max_chars", ai_defaults.shard_max_chars)),
-            structured_output_phase1_formats=_to_string_list(
-                ai_cfg.get("structured_output_phase1_formats", ai_defaults.structured_output_phase1_formats),
-                ai_defaults.structured_output_phase1_formats,
+            structured_output_summarization_formats=_to_optional_string_list(
+                ai_cfg.get("structured_output_summarization_formats", ai_defaults.structured_output_summarization_formats),
+                ai_defaults.structured_output_summarization_formats,
             ),
-            structured_output_phase1_policy=str(
-                ai_cfg.get("structured_output_phase1_policy", ai_defaults.structured_output_phase1_policy)
+            structured_output_summarization_policy=str(
+                ai_cfg.get("structured_output_summarization_policy", ai_defaults.structured_output_summarization_policy)
             ).strip(),
-            structured_output_phase2_formats=_to_string_list(
-                ai_cfg.get("structured_output_phase2_formats", ai_defaults.structured_output_phase2_formats),
-                ai_defaults.structured_output_phase2_formats,
+            structured_output_overview_formats=_to_optional_string_list(
+                ai_cfg.get("structured_output_overview_formats", ai_defaults.structured_output_overview_formats),
+                ai_defaults.structured_output_overview_formats,
             ),
-            structured_output_phase2_policy=str(
-                ai_cfg.get("structured_output_phase2_policy", ai_defaults.structured_output_phase2_policy)
+            structured_output_overview_policy=str(
+                ai_cfg.get("structured_output_overview_policy", ai_defaults.structured_output_overview_policy)
             ).strip(),
             transient_retry_max=int(ai_cfg.get("transient_retry_max", ai_defaults.transient_retry_max)),
             schema_retry_max=int(ai_cfg.get("schema_retry_max", ai_defaults.schema_retry_max)),
@@ -369,13 +392,20 @@ def load_config(
                 int(ai_cfg.get("retry_target_failure_threshold", ai_defaults.retry_target_failure_threshold)),
                 1,
             ),
-            phase1_retry_targets=phase1_retry_targets,
-            phase2_retry_targets=phase2_retry_targets,
+            summarization_retry_targets=summarization_retry_targets,
+            overview_retry_targets=overview_retry_targets,
             backoff_seconds=_to_int_list(ai_cfg.get("backoff_seconds", ai_defaults.backoff_seconds), ai_defaults.backoff_seconds),
             jitter_ms_max=int(ai_cfg.get("jitter_ms_max", ai_defaults.jitter_ms_max)),
-            taxonomy=_to_string_list(ai_cfg.get("taxonomy", ai_defaults.taxonomy), ai_defaults.taxonomy),
-            phase2_text_fallback=_to_bool(ai_cfg.get("phase2_text_fallback"), ai_defaults.phase2_text_fallback),
-            phase2_local_fallback=_to_bool(ai_cfg.get("phase2_local_fallback"), ai_defaults.phase2_local_fallback),
+            preferred_categories=_to_optional_string_list(
+                ai_cfg.get("preferred_categories", ai_defaults.preferred_categories),
+                ai_defaults.preferred_categories,
+            ),
+            categorization_strict=_to_bool(
+                ai_cfg.get("categorization_strict"),
+                ai_defaults.categorization_strict,
+            ),
+            overview_text_fallback=_to_bool(ai_cfg.get("overview_text_fallback"), ai_defaults.overview_text_fallback),
+            overview_local_fallback=_to_bool(ai_cfg.get("overview_local_fallback"), ai_defaults.overview_local_fallback),
             fallback_send_raw_email=_to_bool(ai_cfg.get("fallback_send_raw_email"), ai_defaults.fallback_send_raw_email),
             fallback_warning_text=str(
                 ai_cfg.get("fallback_warning_text", ai_defaults.fallback_warning_text)
@@ -396,6 +426,10 @@ def load_config(
         filter=FilterConfig(
             hours_back=int(filter_cfg.get("hours_back", filter_defaults.hours_back)),
             max_content_length=int(filter_cfg.get("max_content_length", filter_defaults.max_content_length)),
+            rss_missing_pub_date_strict=_to_bool(
+                filter_cfg.get("rss_missing_pub_date_strict"),
+                filter_defaults.rss_missing_pub_date_strict,
+            ),
         ),
         logging=LoggingConfig(
             level=str(logging_cfg.get("level", logging_defaults.level)).upper(),

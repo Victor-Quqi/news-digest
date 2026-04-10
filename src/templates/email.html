@@ -78,11 +78,13 @@
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
                 {% if grouped %}
                   {% for block in grouped %}
+                  {% if block.name %}
                   <tr>
                     <td style="padding:20px 0 10px 0;border-bottom:1px solid #e6eefb;">
                       <div style="font-size:22px;font-weight:700;color:#1f2937;">{{ block.name }}</div>
                     </td>
                   </tr>
+                  {% endif %}
                   {% for item in block.articles %}
                   <tr>
                     <td style="padding:16px 0;">

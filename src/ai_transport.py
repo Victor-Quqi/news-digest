@@ -9,7 +9,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from .ai_debug import AIDebugSink
-from .ai_processor_types import AIProcessingError
+from .ai_processor_types import AISchemaValidationError
 from .config import AIConfig, AIRetryTarget, EnvConfig
 
 
@@ -46,7 +46,7 @@ class AITransport:
         system_prompt: str,
         user_prompt: str,
         schema: Dict[str, Any],
-        phase: str,
+        step: str,
         *,
         target: AIRetryTarget,
     ) -> Any:
@@ -55,12 +55,17 @@ class AITransport:
             {"role": "user", "content": user_prompt},
         ]
         required_keys = self._schema_required_keys(schema)
-        format_names, phase_policy, fallback_to_text = self._structured_policy(phase)
+        format_names, step_policy, fallback_to_text = self._structured_policy(step)
         policy = {
             "formats": format_names,
-            "policy": phase_policy,
+            "policy": step_policy,
             "fallback_to_text": fallback_to_text,
         }
+
+        if not format_names:
+            self._logger.info("%s structured output disabled by config; using plain text JSON", step)
+            fallback_to_text = True
+            policy["fallback_to_text"] = True
 
         structured_errors: List[str] = []
         for response_format in self._structured_formats(schema, format_names):
@@ -69,7 +74,7 @@ class AITransport:
                 self._debug.dump(
                     "request_json.start",
                     {
-                        "phase": phase,
+                        "step": step,
                         "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
@@ -82,7 +87,7 @@ class AITransport:
                 self._debug.dump(
                     "request_json.success",
                     {
-                        "phase": phase,
+                        "step": step,
                         "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
@@ -96,7 +101,7 @@ class AITransport:
                 self._debug.dump(
                     "request_json.error",
                     {
-                        "phase": phase,
+                        "step": step,
                         "target": self._target_payload(target),
                         "structured_policy": policy,
                         "response_format": response_format,
@@ -107,28 +112,30 @@ class AITransport:
                 )
                 self._logger.warning(
                     "%s structured output failed, trying next format: format=%s, error=%s",
-                    phase,
+                    step,
                     response_format.get("type"),
                     exc,
                 )
 
-        if phase_policy == "strict":
+        if step_policy == "strict" and format_names:
             detail = structured_errors[-1] if structured_errors else "no structured output formats configured"
-            raise AIProcessingError(f"{phase} structured output policy is strict, all attempts failed: {detail}")
+            raise AISchemaValidationError(
+                f"{step} structured output policy is strict, all attempts failed: {detail}"
+            )
 
         if not fallback_to_text:
             detail = structured_errors[-1] if structured_errors else "text fallback disabled"
-            raise AIProcessingError(f"{phase} text fallback not enabled: {detail}")
+            raise AISchemaValidationError(f"{step} text fallback not enabled: {detail}")
 
         if structured_errors:
-            self._logger.warning("%s all structured output failed, falling back to plain text JSON", phase)
+            self._logger.warning("%s all structured output failed, falling back to plain text JSON", step)
 
         text = ""
         try:
             self._debug.dump(
                 "request_json.start",
                 {
-                    "phase": phase,
+                    "step": step,
                     "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
@@ -141,7 +148,7 @@ class AITransport:
             self._debug.dump(
                 "request_json.success",
                 {
-                    "phase": phase,
+                    "step": step,
                     "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
@@ -154,7 +161,7 @@ class AITransport:
             self._debug.dump(
                 "request_json.error",
                 {
-                    "phase": phase,
+                    "step": step,
                     "target": self._target_payload(target),
                     "structured_policy": policy,
                     "response_format": None,
@@ -400,30 +407,30 @@ class AITransport:
             return ()
         return tuple(str(item).strip() for item in required if str(item).strip())
 
-    def _structured_policy(self, phase: str) -> Tuple[List[str], str, bool]:
-        if phase == "phase1":
-            raw_formats = self._cfg.structured_output_phase1_formats
-            raw_policy = str(self._cfg.structured_output_phase1_policy or "").strip()
-        elif phase == "phase2":
-            raw_formats = self._cfg.structured_output_phase2_formats
-            raw_policy = str(self._cfg.structured_output_phase2_policy or "").strip()
+    def _structured_policy(self, step: str) -> Tuple[List[str], str, bool]:
+        if step in {"summarization", "categorization", "category_suggestion"}:
+            raw_formats = self._cfg.structured_output_summarization_formats
+            raw_policy = str(self._cfg.structured_output_summarization_policy or "").strip()
+        elif step in {"overview", "overview_headline", "overview_groups"}:
+            raw_formats = self._cfg.structured_output_overview_formats
+            raw_policy = str(self._cfg.structured_output_overview_policy or "").strip()
         else:
             raw_formats = ["json_schema", "json_object"]
             raw_policy = "prefer"
 
-        formats = self._normalize_structured_format_names(raw_formats, phase=phase)
-        policy = self._normalize_structured_policy(raw_policy, phase=phase)
+        formats = self._normalize_structured_format_names(raw_formats, step=step)
+        policy = self._normalize_structured_policy(raw_policy, step=step)
         fallback_to_text = policy == "prefer"
         return formats, policy, fallback_to_text
 
-    def _normalize_structured_policy(self, raw_policy: str, *, phase: str) -> str:
+    def _normalize_structured_policy(self, raw_policy: str, *, step: str) -> str:
         normalized = str(raw_policy or "").strip().lower()
         if normalized in {"strict", "prefer"}:
             return normalized
         if normalized:
             self._logger.warning(
                 "%s ignoring unknown structured policy: %s, falling back to strict",
-                phase,
+                step,
                 raw_policy,
             )
         return "strict"
@@ -432,7 +439,7 @@ class AITransport:
         self,
         raw_formats: Sequence[str],
         *,
-        phase: str,
+        step: str,
     ) -> List[str]:
         alias = {
             "json_schema": "json_schema",
@@ -463,7 +470,7 @@ class AITransport:
         if unknown:
             self._logger.warning(
                 "%s ignoring unknown structured output formats: %s",
-                phase,
+                step,
                 ", ".join(unknown),
             )
         return normalized

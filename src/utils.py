@@ -177,7 +177,7 @@ class PipelineTimer:
 
     Stage names use leading spaces to indicate nesting depth:
       "RSS fetch"         — top level (depth 0)
-      "  Phase 1"         — depth 1 (child of preceding depth-0)
+      "  Summarization"   — depth 1 (child of preceding depth-0)
       "    Shard 1"       — depth 2 (child of preceding depth-1)
       "      API"         — depth 3 (child of preceding depth-2)
 

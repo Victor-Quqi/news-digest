@@ -1,53 +1,108 @@
 email_subject: "新闻日报"
-taxonomy:
-  - "科技"
-  - "金融"
-  - "政策"
-  - "市场"
-  - "国际"
-  - "其他"
-default_category: "其他"
 
 prompts:
-  phase1:
+  summarization:
     system: |-
-      任务：为每篇新闻输出 oneLine 和 category。
+      任务：为每篇新闻输出 oneLine。
       oneLine：中文单行，简洁明确，只保留核心信息。
       每条 oneLine 只能对应同 id 的原文，不要复用别条新闻的表述，不要把相似新闻写成同一句话。
-      category：仅选 1 个，优先从 {taxonomy_text} 中选择；若都不贴切可自定义更合适分类。
       只输出严格 JSON，不要解释、不要 Markdown。
     user: |-
       请处理以下 {count} 篇新闻。
-      可选 category: {taxonomy_json}
       输出格式：
       {example_output}
 
       articles={articles_json}
-  phase2:
+  categorization:
+    system: |-
+      任务：为每篇新闻输出 1 个 category。
+      可参考标题和正文片段判断。
+      {category_language_instruction}
+      {categorization_policy_instruction}
+      {already_used_categories_instruction}
+      category 不能为空。
+      只输出严格 JSON，不要解释、不要 Markdown。
+    user: |-
+      请处理以下 {count} 篇新闻。
+      {category_candidates_block}{already_used_categories_block}输出格式：
+      {example_output}
+
+      articles={articles_json}
+  category_suggestion:
+    system: |-
+      任务：先为这一批新闻提炼一组建议分类。
+      参考标题和短正文片段。
+      {category_language_instruction}
+      {category_suggestion_policy_instruction}
+      {existing_categories_instruction}
+      分类列表不能为空。
+      只输出严格 JSON，不要解释、不要 Markdown。
+    user: |-
+      请处理以下 {count} 篇新闻。
+      {existing_categories_block}输出格式：
+      {example_output}
+
+      articles={articles_json}
+  overview_headline:
     structured: |-
-      任务：根据 articles 生成新闻总览。用中文撰写。
-      只返回 JSON：{{"summaryLines":[...]}}
+      任务：只写新闻总览第1行。用中文撰写。
+      只返回 JSON：{{"headline":"..."}}
       要求：
-      - `summaryLines` 是 5-9 个字符串。
-      - 每个字符串对应一行，字符串内部不得出现换行符。
-      - 第1个字符串写全天总述，点出至少一个最吸引眼球的具体事件，不带 `[id]`。
-      - 第2行起，每行归纳 2-4 条新闻，写成信息完整的短句，不要只列主题词或关键词，行尾附 `[id]` 引用，可多个。
+      - 只写 1 行。
+      - 点出至少一个最吸引眼球的具体事件。
+      - 禁止出现任何 `[id]` 引用。
+      - 语气自然，像日报开头，不要写成标题。
+      - 尽量控制在 {summary_target} 字左右。
+      - 除 JSON 外不要输出任何内容。
+    plain_text: |-
+      任务：只写新闻总览第1行。用中文撰写。
+      要求：
+      - 只写 1 行。
+      - 点出至少一个最吸引眼球的具体事件。
+      - 禁止出现任何 `[id]` 引用。
+      - 语气自然，像日报开头，不要写成标题。
+      - 尽量控制在 {summary_target} 字左右。
+      - 不要输出 JSON。
+      - 不要输出标题、前后缀或解释。
+    example_output: '{"headline":"<一句总述>"}'
+    plain_text_example_output: "<一句总述>"
+    user: |-
+      文章数: {count}
+      请只生成第1行。
+      输出格式：
+      {example_output}
+
+      articles={article_lines}
+  overview_groups:
+    structured: |-
+      任务：续写新闻总览第2行起。用中文撰写。
+      只返回 JSON：{{"groupLines":[...]}}
+      要求：
+      - 输出 3-8 行。
+      - 每行单独成句，不得换行。
+      - 承接给定 headline 往下写，不要再写全天总述，不要重复 headline。
+      - 每行归纳 2-4 条新闻，不要只列主题词或关键词。
+      - 每行行尾都要附 `[id]` 引用，可多个。
+      - 多数行尽量包含 2 个及以上 `[id]`。
       - 每行尽量控制在 {summary_target} 字左右。
       - 除 JSON 外不要输出任何内容。
     plain_text: |-
-      任务：根据 articles 输出新闻总览纯文本。用中文撰写。
+      任务：续写新闻总览第2行起。用中文撰写。
       要求：
-      - 共 5-9 行。
-      - 每一行内部不得换行。
-      - 第1行写全天总述，点出至少一个最吸引眼球的具体事件，不带 `[id]`。
-      - 第2行起，每行归纳 2-4 条新闻，写成信息完整的短句，不要只列主题词或关键词，行尾附 `[id]` 引用，可多个。
+      - 输出 3-8 行。
+      - 每行单独成句，不得换行。
+      - 承接给定 headline 往下写，不要再写全天总述，不要重复 headline。
+      - 每行归纳 2-4 条新闻，不要只列主题词或关键词。
+      - 每行行尾都要附 `[id]` 引用，可多个。
+      - 多数行尽量包含 2 个及以上 `[id]`。
       - 每行尽量控制在 {summary_target} 字左右。
       - 不要输出标题、前后缀或解释。
-    example_output: '{"summaryLines":["霍尔木兹局势继续紧绷，美国就业和服务业数据又一冷一热，油价、黄金和科技股都变得更敏感。","伊朗称袭击关联船只并启用新防空系统，美方判断霍尔木兹紧张局势短期难缓，运载必需品船只仍获放行。[1][3][6][57]"]}'
+    example_output: '{"groupLines":["<第2行>[1][2]","<第3行>[3][4]","<第4行>[5][6]"]}'
     user: |-
       文章数: {count}
       可引用 id 范围: 1-{max_id}
-      请生成总览。
+      headline={headline}
+      请生成第2行起的总览。
       输出格式：
       {example_output}
 
@@ -102,7 +157,7 @@ theme_keywords:
 
 fallback:
   no_articles: "今日暂无符合条件的新闻。"
-  phase2_failed: "本期 AI 总览生成失败，以下为原文列表。"
+  overview_failed: "本期 AI 总览生成失败，以下为原文列表。"
   no_overview: "今日暂无可用总览。"
   warning: "⚠ 本期 AI 摘要/分类生成失败，当前邮件为原文列表降级版。"
 

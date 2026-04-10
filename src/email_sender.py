@@ -42,10 +42,16 @@ def _group_articles(
     categories: List[str],
     locale: Locale,
 ) -> List[Dict[str, object]]:
+    if not categories:
+        ordered_articles = sorted(articles, key=lambda x: x.pub_date, reverse=True)
+        return [{"name": "", "articles": ordered_articles, "show_heading": False}]
+
     grouped: Dict[str, List[ProcessedArticle]] = defaultdict(list)
-    default_category = locale.default_category
     for item in articles:
-        grouped[item.category or default_category].append(item)
+        category = (item.category or "").strip()
+        if not category:
+            continue
+        grouped[category].append(item)
 
     for key in grouped:
         grouped[key].sort(key=lambda x: x.pub_date, reverse=True)
@@ -55,7 +61,7 @@ def _group_articles(
         if key not in ordered_categories:
             ordered_categories.append(key)
 
-    return [{"name": cat, "articles": grouped[cat]} for cat in ordered_categories]
+    return [{"name": cat, "articles": grouped[cat], "show_heading": True} for cat in ordered_categories]
 
 
 def _linkify_summary_line(line: str, id_to_link: Dict[int, str]) -> str:
@@ -165,7 +171,7 @@ def send_email(
             locale=locale,
             template_name=template_name,
         )
-        subject = locale.email_subject or email_cfg.subject
+        subject = email_cfg.subject or locale.email_subject or "News Digest"
         if result.degraded:
             degraded_label = locale.t("AI Degraded Mode")
             subject = f"{subject} [{degraded_label}]"
@@ -203,7 +209,7 @@ def send_html_file(
         raise FileNotFoundError(f"HTML file not found: {html_path}")
 
     html = path.read_text(encoding="utf-8")
-    subject = subject or locale.email_subject or email_cfg.subject
+    subject = subject or email_cfg.subject or locale.email_subject or "News Digest"
 
     msg = _build_html_message(
         subject=subject,

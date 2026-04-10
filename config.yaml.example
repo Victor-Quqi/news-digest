@@ -1,11 +1,12 @@
 # Locale used for prompts, fallback copy, and the email template.
+# Environment-variable expansion is supported here too.
 locale: zh
 
 email:
   # Final recipient list. Environment-variable expansion is supported.
   to:
     - ${EMAIL_TO}
-  # Base subject line. Locale data can still override it at render time.
+  # Base subject line. Explicit config wins over locale defaults.
   subject: 新闻日报
 
 schedule:
@@ -25,20 +26,20 @@ ai:
   context_window: 128000
   # Start sharding when estimated tokens exceed this ratio of context_window.
   shard_threshold_ratio: 0.6
-  # Hard limit for the number of articles sent in one phase-1 shard.
+  # Hard limit for the number of articles sent in one summarization shard.
   shard_max_articles: 35
-  # Hard limit for the combined character count of one phase-1 shard.
+  # Hard limit for the combined character count of one summarization shard.
   shard_max_chars: 120000
-  # Structured output formats to try for phase 1, in order.
+  # Structured output formats to try for summarization / categorization, in order.
   # Supported values: json_schema, json_object. Use [] to disable structured output.
-  structured_output_phase1_formats: ["json_schema", "json_object"]
+  structured_output_summarization_formats: ["json_schema", "json_object"]
   # strict: fail immediately if all structured attempts fail.
   # prefer: try structured output first, then fall back to plain-text JSON.
-  structured_output_phase1_policy: strict
-  # Structured output formats to try for phase 2, in order.
-  structured_output_phase2_formats: ["json_schema", "json_object"]
-  # Same policy semantics as phase 1.
-  structured_output_phase2_policy: strict
+  structured_output_summarization_policy: strict
+  # Structured output formats to try for overview, in order.
+  structured_output_overview_formats: ["json_schema", "json_object"]
+  # Same policy semantics as summarization.
+  structured_output_overview_policy: strict
   # Retries for transient transport / rate-limit / timeout failures.
   transient_retry_max: 8
   # Retries for invalid JSON or schema / business-rule validation failures.
@@ -47,22 +48,24 @@ ai:
   retry_error_keywords: []
   # Switch to the next retry target after the current target fails this many times.
   retry_target_failure_threshold: 3
-  # Retry targets used by phase 1. Add more items to switch upstream/model on repeated failures.
-  phase1_retry_targets:
+  # Retry targets used by summarization / categorization. Add more items to switch upstream/model on repeated failures.
+  summarization_retry_targets:
     - name: primary
       base_url: ${OPENAI_BASE_URL}
       api_key: ${OPENAI_API_KEY}
       model: ${OPENAI_MODEL}
+    # Optional backup target. Uncomment after setting OPENAI_BACKUP_* env vars.
     # - name: backup
     #   base_url: ${OPENAI_BACKUP_BASE_URL}
     #   api_key: ${OPENAI_BACKUP_API_KEY}
     #   model: ${OPENAI_BACKUP_MODEL}
-  # Retry targets used by phase 2. You can keep them the same as phase 1 or tune separately.
-  phase2_retry_targets:
+  # Retry targets used by overview. You can keep them the same as summarization or tune separately.
+  overview_retry_targets:
     - name: primary
       base_url: ${OPENAI_BASE_URL}
       api_key: ${OPENAI_API_KEY}
       model: ${OPENAI_MODEL}
+    # Optional backup target. Uncomment after setting OPENAI_BACKUP_* env vars.
     # - name: backup
     #   base_url: ${OPENAI_BACKUP_BASE_URL}
     #   api_key: ${OPENAI_BACKUP_API_KEY}
@@ -71,12 +74,15 @@ ai:
   backoff_seconds: [1, 2, 4]
   # Extra random jitter added to retries, in milliseconds.
   jitter_ms_max: 300
-  # Category labels expected from the model. Locale-specific prompts may override this.
-  taxonomy: ["科技", "金融", "政策", "市场", "国际", "其他"]
-  # If true, phase 2 may retry with plain-text output when JSON output fails.
-  phase2_text_fallback: false
-  # If true, phase 2 may build a local rule-based overview when AI output fails.
-  phase2_local_fallback: false
+  # Optional prompt hints. If empty, the pipeline first asks AI to suggest a compact category set for this batch.
+  # If a configured category fits, the model should prefer these names.
+  preferred_categories: []
+  # If true, categorization must succeed after retries; otherwise continue with a flat article list.
+  categorization_strict: true
+  # If true, split overview generation (headline + groups) may retry with plain-text output when JSON output fails.
+  overview_text_fallback: false
+  # If true, overview may build a local rule-based overview when AI output fails.
+  overview_local_fallback: false
   # If true, send a degraded raw-article email instead of failing the whole run.
   fallback_send_raw_email: false
   # Warning text shown in degraded emails.
@@ -107,6 +113,8 @@ filter:
   hours_back: 24
   # Truncate cleaned article bodies before they are sent to the model.
   max_content_length: 6000
+  # If true, drop RSS items that do not expose a publish time.
+  rss_missing_pub_date_strict: true
 
 logging:
   # Standard Python logging level.

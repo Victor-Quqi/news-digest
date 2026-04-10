@@ -127,29 +127,14 @@ class Locale:
     def email_subject(self) -> str:
         return str(self.get("email_subject", ""))
 
-    @property
-    def taxonomy(self) -> list[str]:
-        value = self.get("taxonomy", [])
-        if not isinstance(value, list):
-            return []
-        return [str(item) for item in value if str(item).strip()]
-
-    @property
-    def default_category(self) -> str:
-        configured = str(self.get("default_category", "") or "").strip()
-        if configured:
-            return configured
-        taxonomy = self.taxonomy
-        return taxonomy[-1] if taxonomy else ""
-
-    def get_prompt(self, phase: str, role: str) -> str:
-        value = self.get(f"prompts.{phase}.{role}", _MISSING)
+    def get_prompt(self, step: str, role: str) -> str:
+        value = self.get(f"prompts.{step}.{role}", _MISSING)
         if value is _MISSING:
-            raise KeyError(f"Prompt not found: phase={phase}, role={role}")
+            raise KeyError(f"Prompt not found: step={step}, role={role}")
         return str(value)
 
-    def render_prompt(self, phase: str, role: str, **kwargs: Any) -> str:
-        return self.get_prompt(phase, role).format(**kwargs)
+    def render_prompt(self, step: str, role: str, **kwargs: Any) -> str:
+        return self.get_prompt(step, role).format(**kwargs)
 
     @property
     def theme_keywords(self) -> dict[str, list[str]]:
@@ -168,13 +153,6 @@ class Locale:
         if not isinstance(value, dict):
             return {}
         return {str(key): str(item) for key, item in value.items()}
-
-    @property
-    def overview_placeholders(self) -> set[str]:
-        value = self.get("overview_placeholders", [])
-        if not isinstance(value, list):
-            return set()
-        return {str(item) for item in value if str(item).strip()}
 
     def get(self, dotted_key: str, default: Any = None) -> Any:
         if not dotted_key:
