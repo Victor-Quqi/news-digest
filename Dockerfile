@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY locales/ ./locales/
-COPY .env.example config.yaml.example sources.yaml.example ./
 COPY crontab /etc/cron.d/news-digest
 
 RUN chmod 0644 /etc/cron.d/news-digest && \
