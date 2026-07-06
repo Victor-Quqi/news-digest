@@ -40,8 +40,21 @@ def _title_fingerprint(title: str) -> str:
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", base)
 
 
+def _char_ngrams(text: str, sizes: tuple[int, ...] = (2, 3)) -> set[str]:
+    compact = _title_fingerprint(text)
+    grams: set[str] = set()
+    for size in sizes:
+        for idx in range(max(len(compact) - size + 1, 0)):
+            grams.add(compact[idx : idx + size])
+    return grams
+
+
 def _token_set(text: str) -> set[str]:
     return set(re.findall(r"[\u4e00-\u9fff]{2,}|[a-z0-9]{2,}", normalize_title_key(text)))
+
+
+def _number_set(text: str) -> set[str]:
+    return set(re.findall(r"\d+(?:\.\d+)?%?", normalize_title_key(text)))
 
 
 def _title_similarity(title_a: str, title_b: str) -> float:
@@ -63,6 +76,34 @@ def _title_similarity(title_a: str, title_b: str) -> float:
     return max(seq, jaccard)
 
 
+def _shared_fact_ratio(title_a: str, title_b: str) -> float:
+    terms_a = _char_ngrams(title_a)
+    terms_b = _char_ngrams(title_b)
+    if not terms_a or not terms_b:
+        return 0.0
+    return len(terms_a & terms_b) / min(len(terms_a), len(terms_b))
+
+
+def _has_compatible_numbers(title_a: str, title_b: str) -> bool:
+    numbers_a = _number_set(title_a)
+    numbers_b = _number_set(title_b)
+    if not numbers_a or not numbers_b:
+        return True
+    return len(numbers_a & numbers_b) / min(len(numbers_a), len(numbers_b)) >= 0.67
+
+
+def _is_fact_duplicate(title_a: str, title_b: str, title_sim: float) -> bool:
+    if title_sim < 0.76:
+        return False
+    if not _has_compatible_numbers(title_a, title_b):
+        return False
+
+    shared_ratio = _shared_fact_ratio(title_a, title_b)
+    if title_sim >= 0.82:
+        return shared_ratio >= 0.62
+    return bool(_number_set(title_a) & _number_set(title_b)) and shared_ratio >= 0.58
+
+
 def _content_similarity(content_a: str, content_b: str) -> float:
     a = re.sub(r"\s+", " ", (content_a or "")).strip()[:600]
     b = re.sub(r"\s+", " ", (content_b or "")).strip()[:600]
@@ -74,14 +115,18 @@ def _content_similarity(content_a: str, content_b: str) -> float:
 
 
 def _is_fuzzy_duplicate(a: Article, b: Article) -> bool:
-    title_sim = _title_similarity(a.title, b.title)
-    if title_sim < 0.90:
+    if not _has_compatible_numbers(a.title, b.title):
         return False
+
+    title_sim = _title_similarity(a.title, b.title)
     if title_sim >= 0.97:
         return True
 
     # For medium-high title similarity, also check content similarity to avoid deleting "same template, different event"
-    return _content_similarity(a.content, b.content) >= 0.78
+    if title_sim >= 0.90 and _content_similarity(a.content, b.content) >= 0.78:
+        return True
+
+    return _is_fact_duplicate(a.title, b.title, title_sim)
 
 
 def _dedupe_articles(articles: List[Article]) -> List[Article]:
