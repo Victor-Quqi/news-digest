@@ -101,6 +101,12 @@ class LoggingConfig:
 
 
 @dataclass
+class FailureDeliveryConfig:
+    enabled: bool = True
+    include_warnings: bool = True
+
+
+@dataclass
 class EnvConfig:
     openai_api_key: str
     openai_base_url: str
@@ -120,6 +126,7 @@ class AppConfig:
     ai: AIConfig
     filter: FilterConfig
     logging: LoggingConfig
+    failure_delivery: FailureDeliveryConfig
     env: EnvConfig
     locale: str
 
@@ -328,11 +335,13 @@ def load_config(
     ai_cfg = resolved.get("ai", {})
     filter_cfg = resolved.get("filter", {})
     logging_cfg = resolved.get("logging", {})
+    failure_delivery_cfg = resolved.get("failure_delivery", {})
     email_defaults = EmailConfig()
     schedule_defaults = ScheduleConfig()
     ai_defaults = AIConfig()
     filter_defaults = FilterConfig()
     logging_defaults = LoggingConfig()
+    failure_delivery_defaults = FailureDeliveryConfig()
     default_retry_target = AIRetryTarget(
         name="primary",
         base_url=env.openai_base_url,
@@ -436,6 +445,16 @@ def load_config(
             file=str(logging_cfg.get("file", logging_defaults.file)),
             max_bytes=int(logging_cfg.get("max_bytes", logging_defaults.max_bytes)),
             backup_count=int(logging_cfg.get("backup_count", logging_defaults.backup_count)),
+        ),
+        failure_delivery=FailureDeliveryConfig(
+            enabled=_to_bool(
+                failure_delivery_cfg.get("enabled"),
+                failure_delivery_defaults.enabled,
+            ),
+            include_warnings=_to_bool(
+                failure_delivery_cfg.get("include_warnings"),
+                failure_delivery_defaults.include_warnings,
+            ),
         ),
         env=env,
         locale=locale,

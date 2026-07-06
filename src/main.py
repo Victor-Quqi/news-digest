@@ -12,6 +12,13 @@ from .config import AppConfig, load_config
 from .email_sender import send_email, send_html_file
 from .i18n import Locale
 from .models import ProcessedResult
+from .pipeline_report import (
+    PipelineReport,
+    PipelineRunError,
+    attach_report_warnings,
+    build_failure_result,
+    unwrap_pipeline_error,
+)
 from .rss_fetcher import fetch_all_rss
 from .utils import PipelineTimer, file_lock, setup_logging
 
@@ -57,62 +64,109 @@ async def run_once(
     locale: Locale,
     timer: PipelineTimer,
 ) -> ProcessedResult:
-    logger.info("Pipeline started")
+    report = PipelineReport()
+    try:
+        logger.info("Pipeline started")
 
-    async with timer.async_stage("RSS fetch"):
-        raw_articles = await fetch_all_rss(
-            cfg.rss_sources,
-            logger,
-            missing_pub_date_strict=cfg.filter.rss_missing_pub_date_strict,
-            timer=timer,
+        async with timer.async_stage("RSS fetch"):
+            fetch_result = await fetch_all_rss(
+                cfg.rss_sources,
+                logger,
+                missing_pub_date_strict=cfg.filter.rss_missing_pub_date_strict,
+                timer=timer,
+            )
+        report.extend_warnings(fetch_result.warnings)
+
+        with timer.stage("Clean"):
+            cleaned_articles = clean_articles(
+                fetch_result.articles,
+                hours_back=cfg.filter.hours_back,
+                max_content_length=cfg.filter.max_content_length,
+                timezone_name=cfg.schedule.timezone,
+                logger=logger,
+                timer=timer,
+            )
+
+        if not cleaned_articles:
+            logger.warning("No articles after cleaning, sending empty digest")
+            empty_text = str(locale.fallback_texts.get("no_articles", "") or "").strip() or "No qualifying news today."
+            result = ProcessedResult(
+                articles=[],
+                categories=[],
+                summary_lines=[empty_text],
+                degraded=False,
+                warnings=[],
+            )
+        else:
+            ai = AIProcessor(
+                cfg.ai, cfg.env, logger,
+                debug_capture_all=ai_debug, locale=locale, timer=timer,
+            )
+            try:
+                async with timer.async_stage("AI process"):
+                    result = await ai.process_articles(cleaned_articles)
+            except AIProcessingError as exc:
+                logger.error("AI processing failed: %s", exc)
+                if cfg.ai.fallback_send_raw_email:
+                    logger.warning("Triggering degraded email mode")
+                    warning_text = (
+                        str(locale.fallback_texts.get("warning", "") or "").strip()
+                        or cfg.ai.fallback_warning_text
+                    )
+                    result = ai.build_degraded_result(
+                        cleaned_articles,
+                        warning_text,
+                    )
+                else:
+                    raise
+            finally:
+                await ai.aclose()
+
+        attach_report_warnings(
+            result,
+            report.warnings,
+            include_warnings=cfg.failure_delivery.enabled and cfg.failure_delivery.include_warnings,
+            locale=locale,
         )
 
-    with timer.stage("Clean"):
-        cleaned_articles = clean_articles(
-            raw_articles,
-            hours_back=cfg.filter.hours_back,
-            max_content_length=cfg.filter.max_content_length,
-            timezone_name=cfg.schedule.timezone,
-            logger=logger,
-            timer=timer,
-        )
+        with timer.stage("Email"):
+            send_email(
+                result=result,
+                email_cfg=cfg.email,
+                env_cfg=cfg.env,
+                logger=logger,
+                dry_run=dry_run,
+                timezone_name=cfg.schedule.timezone,
+                locale=locale,
+                timer=timer,
+            )
 
-    if not cleaned_articles:
-        logger.warning("No articles after cleaning, sending empty digest")
-        empty_text = str(locale.fallback_texts.get("no_articles", "") or "").strip() or "No qualifying news today."
-        result = ProcessedResult(
-            articles=[],
-            categories=[],
-            summary_lines=[empty_text],
-            degraded=False,
-            warnings=[],
+        logger.info(
+            "Pipeline complete: articles=%d, categories=%d, summary_lines=%d, degraded=%s, warnings=%d",
+            len(result.articles),
+            len(result.categories),
+            len(result.summary_lines),
+            result.degraded,
+            len(result.warnings),
         )
-    else:
-        ai = AIProcessor(
-            cfg.ai, cfg.env, logger,
-            debug_capture_all=ai_debug, locale=locale, timer=timer,
-        )
-        try:
-            async with timer.async_stage("AI process"):
-                result = await ai.process_articles(cleaned_articles)
-        except AIProcessingError as exc:
-            logger.error("AI processing failed: %s", exc)
-            if cfg.ai.fallback_send_raw_email:
-                logger.warning("Triggering degraded email mode")
-                warning_text = (
-                    str(locale.fallback_texts.get("warning", "") or "").strip()
-                    or cfg.ai.fallback_warning_text
-                )
-                result = ai.build_degraded_result(
-                    cleaned_articles,
-                    warning_text,
-                )
-            else:
-                raise
-        finally:
-            await ai.aclose()
+        timer.summary(logger)
+        return result
+    except Exception as exc:
+        raise PipelineRunError(exc, report.warnings) from exc
 
-    with timer.stage("Email"):
+
+def send_failure_email(
+    *,
+    exc: BaseException,
+    cfg: AppConfig,
+    logger: logging.Logger,
+    dry_run: bool,
+    locale: Locale,
+    timer: PipelineTimer,
+) -> None:
+    cause, warnings = unwrap_pipeline_error(exc)
+    result = build_failure_result(cause, warnings=warnings, locale=locale)
+    with timer.stage("Failure email"):
         send_email(
             result=result,
             email_cfg=cfg.email,
@@ -123,16 +177,6 @@ async def run_once(
             locale=locale,
             timer=timer,
         )
-
-    logger.info(
-        "Pipeline complete: articles=%d, categories=%d, summary_lines=%d, degraded=%s",
-        len(result.articles),
-        len(result.categories),
-        len(result.summary_lines),
-        result.degraded,
-    )
-    timer.summary(logger)
-    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -187,8 +231,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     except FileExistsError:
         logger.error("Another instance is already running, exiting: %s", lock_path)
         return 1
-    except Exception:
+    except Exception as exc:
         logger.exception("Pipeline exited with error")
+        if cfg.failure_delivery.enabled:
+            try:
+                send_failure_email(
+                    exc=exc,
+                    cfg=cfg,
+                    logger=logger,
+                    dry_run=args.dry_run,
+                    locale=locale,
+                    timer=timer,
+                )
+            except Exception:
+                logger.exception("Failure email sending failed")
+        timer.summary(logger)
         return 1
 
     return 0

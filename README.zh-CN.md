@@ -11,6 +11,7 @@
 - 支持中英文界面文案
 - 严格校验结构化输出并带重试
 - AI 失败时可选降级为原文列表邮件
+- 默认开启失败邮件和部分失败警告横幅
 - 提供 `--config`、`--dry-run`、`--send-html`、`--ai-debug`、`--ai-debug-dir`、`--log-level`、`--timing`
 
 ## 快速开始
@@ -61,6 +62,7 @@ docker compose up -d --build
 主要配置集中在 `config.yaml`：
 
 - `email`：收件人和邮件标题；显式配置优先于 locale 默认值
+- `failure_delivery`：致命失败邮件和警告横幅行为
 - `schedule`：cron 表达式和时区
 - `ai`：模型限制、结构化输出策略、主备重试目标、preferred categories 提示、分类严格度、降级和调试日志
 - `filter`：文章时间窗口、正文长度上限、RSS 缺失时间严格度

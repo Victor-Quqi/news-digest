@@ -11,11 +11,20 @@ import aiohttp
 import feedparser
 
 from .config import RSSSource
-from .models import Article
+from .models import Article, RSSFetchResult
 from .utils import PipelineTimer
 
 
 USER_AGENT = "news-digest/1.0 (+https://example.local)"
+
+
+def _exception_summary(exc: BaseException, max_len: int = 300) -> str:
+    text = str(exc or "").strip()
+    summary = f"{exc.__class__.__name__}: {text}" if text else exc.__class__.__name__
+    summary = " ".join(summary.split())
+    if len(summary) <= max_len:
+        return summary
+    return summary[: max_len - 3].rstrip() + "..."
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -79,7 +88,7 @@ async def _fetch_single_source(
     timeout_seconds: int = 20,
     max_retry: int = 3,
     retry_interval_seconds: int = 5,
-) -> List[Article]:
+) -> RSSFetchResult:
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     headers = {"User-Agent": USER_AGENT}
 
@@ -124,7 +133,7 @@ async def _fetch_single_source(
                     )
 
                 logger.info("RSS fetch success: %s, count=%d", source.name, len(items))
-                return items
+                return RSSFetchResult(articles=items)
             except Exception as exc:
                 if attempt < max_retry:
                     logger.warning(
@@ -137,9 +146,14 @@ async def _fetch_single_source(
                     await asyncio.sleep(retry_interval_seconds)
                 else:
                     logger.error("RSS fetch ultimately failed: %s, error=%s", source.name, repr(exc))
-                    return []
+                    return RSSFetchResult(
+                        articles=[],
+                        warnings=[
+                            f"RSS source failed: {source.name} ({_exception_summary(exc)})",
+                        ],
+                    )
 
-    return []
+    return RSSFetchResult(articles=[])
 
 
 async def fetch_all_rss(
@@ -148,9 +162,9 @@ async def fetch_all_rss(
     *,
     missing_pub_date_strict: bool = True,
     timer: PipelineTimer | None = None,
-) -> List[Article]:
+) -> RSSFetchResult:
     if not sources:
-        return []
+        return RSSFetchResult(articles=[])
 
     if timer is None:
         timer = PipelineTimer(enabled=False)
@@ -169,11 +183,14 @@ async def fetch_all_rss(
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_articles: List[Article] = []
+    warnings: List[str] = []
     for source, result in zip(sources, results):
         if isinstance(result, Exception):
             logger.error("RSS task exception: %s, error=%s", source.name, result)
+            warnings.append(f"RSS source task failed: {source.name} ({_exception_summary(result)})")
             continue
-        all_articles.extend(result)
+        all_articles.extend(result.articles)
+        warnings.extend(result.warnings)
 
     logger.info("RSS fetch complete: sources=%d, total_articles=%d", len(sources), len(all_articles))
-    return all_articles
+    return RSSFetchResult(articles=all_articles, warnings=warnings)

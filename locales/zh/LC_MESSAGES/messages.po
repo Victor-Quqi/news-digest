@@ -27,6 +27,18 @@ msgstr "篇文章"
 msgid "AI Degraded Mode"
 msgstr "AI 降级模式"
 
+msgid "Run Failed"
+msgstr "运行失败"
+
+msgid "Warnings: {count}"
+msgstr "警告：{count} 条"
+
+msgid "Warning details are listed near the bottom of this email."
+msgstr "详细信息见邮件底部。"
+
+msgid "Warning Details"
+msgstr "警告详情"
+
 msgid "footer_before_author"
 msgstr "由"
 

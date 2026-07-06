@@ -11,6 +11,7 @@ Daily RSS-to-email digest for teams or personal monitoring. The pipeline fetches
 - i18n support for Chinese and English UI copy
 - Strict structured-output validation with retries
 - Optional degraded raw-article email when AI output fails
+- Default-on failure email and warning banner for partial pipeline failures
 - `--config`, `--dry-run`, `--send-html`, `--ai-debug`, `--ai-debug-dir`, `--log-level`, and `--timing`
 
 ## Quick Start
@@ -61,6 +62,7 @@ The image only includes example config files. Real runtime files are mounted fro
 Most behavior is controlled in `config.yaml`:
 
 - `email`: recipients and subject, with config taking priority over locale defaults
+- `failure_delivery`: fatal failure email and warning-banner behavior
 - `schedule`: cron expression and timezone
 - `ai`: model limits, structured-output policy, primary/backup retry targets, optional preferred category hints, categorization strictness, fallback behavior, debug logging
 - `filter`: article time window, content length cap, and missing-RSS-time strictness

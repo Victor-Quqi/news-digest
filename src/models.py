@@ -19,6 +19,12 @@ class Article(ArticleBase):
 
 
 @dataclass
+class RSSFetchResult:
+    articles: List[Article]
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
 class CleanedArticle(Article):
     id: int
 
@@ -37,3 +43,4 @@ class ProcessedResult:
     summary_lines: List[str]
     degraded: bool = False
     warnings: List[str] = field(default_factory=list)
+    subject_label: str = ""

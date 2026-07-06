@@ -128,6 +128,14 @@ class AIProcessor:
                 raise AIProcessingError(f"Categorization failed (strict mode): {exc}") from exc
             self.logger.warning("Categorization failed, continuing without category grouping: %s", exc)
             category_map = None
+            warnings = [
+                self._locale_fallback_text(
+                    "categorization_failed",
+                    "AI categorization failed. Articles are shown without category grouping.",
+                )
+            ]
+        else:
+            warnings = []
 
         if category_map:
             with self._timer.stage("  Categories"):
@@ -139,7 +147,7 @@ class AIProcessor:
             categories=categories,
             summary_lines=summary_lines,
             degraded=False,
-            warnings=[],
+            warnings=warnings,
         )
 
     def build_degraded_result(

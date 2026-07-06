@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.config import load_config
-from src.email_sender import render_email_html
+from src.email_sender import build_email_subject, render_email_html
 from src.i18n import Locale
 from src.models import ProcessedArticle, ProcessedResult
 
@@ -63,10 +63,24 @@ class ExampleConfigSmokeTest(unittest.TestCase):
         self.assertEqual(cfg.ai.overview_retry_targets[0].model, cfg.env.openai_model)
         self.assertEqual(cfg.ai.preferred_categories, [])
         self.assertTrue(cfg.ai.categorization_strict)
+        self.assertTrue(cfg.failure_delivery.enabled)
+        self.assertTrue(cfg.failure_delivery.include_warnings)
         self.assertTrue(cfg.filter.rss_missing_pub_date_strict)
         self.assertIn("Example overview", html)
         self.assertIn("https://example.com/article", html)
         self.assertNotIn("其他", html)
+
+        result.warnings.append("RSS source failed: Example Feed")
+        warning_html = render_email_html(
+            result=result,
+            date_text="2026-03-19",
+            locale=locale,
+        )
+        self.assertIn("警告：1 条", warning_html)
+        self.assertIn("详细信息见邮件底部", warning_html)
+        self.assertIn("警告详情", warning_html)
+        self.assertIn("RSS source failed: Example Feed", warning_html)
+        self.assertEqual(build_email_subject(result, cfg.email, locale), "新闻日报")
 
     def test_env_locale_and_optional_lists(self) -> None:
         config_path = Path("tests") / "_tmp_config.yaml"
@@ -83,6 +97,9 @@ class ExampleConfigSmokeTest(unittest.TestCase):
                         "  structured_output_overview_formats: []",
                         "  preferred_categories: []",
                         "  categorization_strict: false",
+                        "failure_delivery:",
+                        "  enabled: false",
+                        "  include_warnings: false",
                         "filter:",
                         "  rss_missing_pub_date_strict: false",
                     ]
@@ -110,6 +127,8 @@ class ExampleConfigSmokeTest(unittest.TestCase):
         self.assertEqual(cfg.ai.structured_output_overview_formats, [])
         self.assertEqual(cfg.ai.preferred_categories, [])
         self.assertFalse(cfg.ai.categorization_strict)
+        self.assertFalse(cfg.failure_delivery.enabled)
+        self.assertFalse(cfg.failure_delivery.include_warnings)
         self.assertFalse(cfg.filter.rss_missing_pub_date_strict)
         self.assertEqual(len(cfg.rss_sources), 1)
 

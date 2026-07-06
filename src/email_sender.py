@@ -114,7 +114,8 @@ def render_email_html(
     id_to_link = {item.id: item.link for item in result.articles}
     summary_lines_html = [_linkify_summary_line(line, id_to_link) for line in result.summary_lines]
     grouped = _group_articles(result.articles, result.categories, locale=locale)
-    preheader_text = _truncate_preheader_text(result.summary_lines)
+    preheader_text = _truncate_preheader_text([*result.warnings, *result.summary_lines])
+    warning_count = len(result.warnings)
 
     return template.render(
         date_text=date_text,
@@ -124,6 +125,9 @@ def render_email_html(
         grouped=grouped,
         degraded=result.degraded,
         warnings=result.warnings,
+        warning_summary=locale.t("Warnings: {count}", count=warning_count) if warning_count else "",
+        warning_detail_hint=locale.t("Warning details are listed near the bottom of this email."),
+        warning_detail_title=locale.t("Warning Details"),
         timezone_name=timezone_name,
         format_pub_datetime=format_pub_datetime,
         locale=locale,
@@ -144,6 +148,20 @@ def _build_html_message(
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(html, "html", "utf-8"))
     return msg
+
+
+def build_email_subject(
+    result: ProcessedResult,
+    email_cfg: EmailConfig,
+    locale: Locale,
+) -> str:
+    subject = email_cfg.subject or locale.email_subject or "News Digest"
+    if result.subject_label:
+        return f"{subject} [{result.subject_label}]"
+    if result.degraded:
+        degraded_label = locale.t("AI Degraded Mode")
+        return f"{subject} [{degraded_label}]"
+    return subject
 
 
 def send_email(
@@ -171,10 +189,7 @@ def send_email(
             locale=locale,
             template_name=template_name,
         )
-        subject = email_cfg.subject or locale.email_subject or "News Digest"
-        if result.degraded:
-            degraded_label = locale.t("AI Degraded Mode")
-            subject = f"{subject} [{degraded_label}]"
+        subject = build_email_subject(result, email_cfg, locale)
 
     with timer.stage("  Send"):
         if dry_run:

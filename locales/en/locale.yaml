@@ -213,6 +213,9 @@ fallback:
   overview_failed: "AI overview generation failed for this issue. The original article list is shown below."
   no_overview: "No overview available today."
   warning: "⚠ AI summarization/categorization failed for this issue. The current email is a degraded raw-article version."
+  categorization_failed: "AI categorization failed. Articles are shown without category grouping."
+  pipeline_failed: "News digest generation failed before a normal email could be produced."
+  pipeline_error: "Error: {error}"
 
 overview_placeholders:
   - "Daily trend overview"

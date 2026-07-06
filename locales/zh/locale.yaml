@@ -213,6 +213,9 @@ fallback:
   overview_failed: "本期 AI 总览生成失败，以下为原文列表。"
   no_overview: "今日暂无可用总览。"
   warning: "⚠ 本期 AI 摘要/分类生成失败，当前邮件为原文列表降级版。"
+  categorization_failed: "AI 分类失败，当前邮件未按分类分组。"
+  pipeline_failed: "本次日报生成失败，未能生成正常内容。"
+  pipeline_error: "错误：{error}"
 
 overview_placeholders:
   - "全天趋势总述"

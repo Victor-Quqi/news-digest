@@ -35,13 +35,12 @@
             </td>
           </tr>
 
-          <!-- Warning (degraded mode only) -->
-          {% if degraded and warnings %}
+          <!-- Warning -->
+          {% if warnings %}
           <tr>
             <td style="padding:12px 24px;background:#fff7db;border-bottom:1px solid #ffd876;font-size:15px;color:#7a5c00;line-height:1.6;">
-              {% for line in warnings %}
-                <div>{{ line }}</div>
-              {% endfor %}
+              <div style="font-weight:700;color:#6b4a00;">{{ warning_summary }}</div>
+              <div style="margin-top:4px;font-size:13px;color:#9a7410;">{{ warning_detail_hint }}</div>
             </td>
           </tr>
           {% endif %}
@@ -109,6 +108,17 @@
           </tr>
 
           <!-- Footer -->
+          {% if warnings %}
+          <tr>
+            <td style="padding:16px 24px;border-top:1px solid #e6eefb;font-size:13px;color:#6b7280;line-height:1.6;">
+              <div style="font-size:15px;font-weight:700;color:#1f2937;">{{ warning_detail_title }}</div>
+              {% for line in warnings %}
+                <div style="margin-top:6px;">{{ loop.index }}. {{ line }}</div>
+              {% endfor %}
+            </td>
+          </tr>
+          {% endif %}
+
           <tr>
             <td style="padding:16px 24px;border-top:1px solid #e6eefb;font-size:15px;color:#6b7280;line-height:1.6;">
               {% trans %}footer_before_author{% endtrans %} <a href="https://github.com/Victor-Quqi" target="_blank" rel="noopener noreferrer" style="color:#3b82f6;text-decoration:none;">Victor-Quqi</a> / news-digest {% trans %}footer_after_author{% endtrans %}

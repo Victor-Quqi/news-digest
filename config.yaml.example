@@ -9,6 +9,12 @@ email:
   # Base subject line. Explicit config wins over locale defaults.
   subject: 新闻日报
 
+failure_delivery:
+  # If true, fatal pipeline failures still try to send a failure email when SMTP is available.
+  enabled: true
+  # If true, non-fatal warnings such as failed RSS sources are shown in digest emails.
+  include_warnings: true
+
 schedule:
   # Cron expression used by the bundled cron-based Docker image.
   cron: "0 8 * * *"
