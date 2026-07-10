@@ -420,80 +420,79 @@ class AIProcessor:
             return estimated + 2000 + self.cfg.max_tokens
         return len(self.encoding.encode(text)) + 2000 + self.cfg.max_tokens
 
-    def _build_shards(self, articles: Sequence[CleanedArticle]) -> list[list[CleanedArticle]]:
+    def _should_shard(
+        self,
+        articles: Sequence[CleanedArticle],
+        *,
+        estimated_tokens: int,
+        threshold: int,
+    ) -> bool:
+        return (
+            len(articles) > max(int(self.cfg.shard_max_articles), 1)
+            or estimated_tokens >= threshold
+        )
+
+    def _build_token_bounded_shards(
+        self,
+        articles: Sequence[CleanedArticle],
+        *,
+        threshold: int,
+        estimate_tokens: Callable[[Sequence[CleanedArticle]], int],
+    ) -> list[list[CleanedArticle]]:
         shards: list[list[CleanedArticle]] = []
         current: list[CleanedArticle] = []
-        current_chars = 0
+        max_articles = max(int(self.cfg.shard_max_articles), 1)
 
         for article in articles:
-            article_chars = len(article.title) + len(article.content)
-            reaches_limit = (
-                len(current) >= self.cfg.shard_max_articles
-                or current_chars + article_chars > self.cfg.shard_max_chars
+            candidate = [*current, article]
+            reaches_limit = len(current) >= max_articles or (
+                bool(current) and estimate_tokens(candidate) > threshold
             )
             if current and reaches_limit:
                 shards.append(current)
-                current = []
-                current_chars = 0
-
-            current.append(article)
-            current_chars += article_chars
+                current = [article]
+            else:
+                current.append(article)
 
         if current:
             shards.append(current)
         return shards
+
+    def _build_shards(
+        self,
+        articles: Sequence[CleanedArticle],
+        *,
+        threshold: int,
+    ) -> list[list[CleanedArticle]]:
+        return self._build_token_bounded_shards(
+            articles,
+            threshold=threshold,
+            estimate_tokens=self._estimate_tokens,
+        )
 
     def _build_categorization_shards(
         self,
         articles: Sequence[CleanedArticle],
+        *,
+        threshold: int,
     ) -> list[list[CleanedArticle]]:
-        shards: list[list[CleanedArticle]] = []
-        current: list[CleanedArticle] = []
-        current_chars = 0
-
-        for article in articles:
-            article_chars = len(article.title) + len(self._prompt_builder.categorization_content(article.content))
-            reaches_limit = (
-                len(current) >= self.cfg.shard_max_articles
-                or current_chars + article_chars > self.cfg.shard_max_chars
-            )
-            if current and reaches_limit:
-                shards.append(current)
-                current = []
-                current_chars = 0
-
-            current.append(article)
-            current_chars += article_chars
-
-        if current:
-            shards.append(current)
-        return shards
+        return self._build_token_bounded_shards(
+            articles,
+            threshold=threshold,
+            estimate_tokens=self._estimate_tokens_for_categorization,
+        )
 
     def _build_category_suggestion_shards(
         self,
         articles: Sequence[CleanedArticle],
+        *,
+        threshold: int,
     ) -> list[list[CleanedArticle]]:
-        shards: list[list[CleanedArticle]] = []
-        current: list[CleanedArticle] = []
-        current_chars = 0
-
-        for article in articles:
-            article_chars = len(article.title) + len(self._prompt_builder.category_suggestion_content(article.content))
-            reaches_limit = (
-                len(current) >= self.cfg.shard_max_articles
-                or current_chars + article_chars > self.cfg.shard_max_chars
-            )
-            if current and reaches_limit:
-                shards.append(current)
-                current = []
-                current_chars = 0
-
-            current.append(article)
-            current_chars += article_chars
-
-        if current:
-            shards.append(current)
-        return shards
+        return self._build_token_bounded_shards(
+            articles,
+            threshold=threshold,
+            estimate_tokens=self._estimate_tokens_for_category_suggestion,
+        )
 
     async def _run_summarization(
         self,
@@ -502,12 +501,16 @@ class AIProcessor:
         estimated_tokens: int,
         threshold: int,
     ) -> dict[int, dict[str, str]]:
-        if estimated_tokens < threshold:
+        if not self._should_shard(
+            articles,
+            estimated_tokens=estimated_tokens,
+            threshold=threshold,
+        ):
             async with self._timer.async_stage("  Summarization"):
                 return await self._summarize_batch(list(articles), shard_label="Shard 1")
 
         with self._timer.stage("  Summary sharding"):
-            shards = self._build_shards(articles)
+            shards = self._build_shards(articles, threshold=threshold)
         self.logger.info("Summarization shard mode: shard_count=%d", len(shards))
         async with self._timer.async_stage("  Summarization"):
             return await self._summarize_shards(shards)
@@ -537,7 +540,11 @@ class AIProcessor:
             threshold,
         )
 
-        if estimated_tokens < threshold:
+        if not self._should_shard(
+            articles,
+            estimated_tokens=estimated_tokens,
+            threshold=threshold,
+        ):
             async with self._timer.async_stage("  Categorization"):
                 return await self._categorize_batch(
                     list(articles),
@@ -548,7 +555,7 @@ class AIProcessor:
                 )
 
         with self._timer.stage("  Category sharding"):
-            shards = self._build_categorization_shards(articles)
+            shards = self._build_categorization_shards(articles, threshold=threshold)
         self.logger.info("Categorization shard mode: shard_count=%d", len(shards))
 
         merged: dict[int, str] = {}
@@ -583,7 +590,11 @@ class AIProcessor:
             threshold,
         )
 
-        if estimated_tokens < threshold:
+        if not self._should_shard(
+            articles,
+            estimated_tokens=estimated_tokens,
+            threshold=threshold,
+        ):
             async with self._timer.async_stage("  Category suggestion"):
                 return await self._suggest_categories_batch(
                     list(articles),
@@ -593,7 +604,7 @@ class AIProcessor:
                 )
 
         with self._timer.stage("  Category suggestion sharding"):
-            shards = self._build_category_suggestion_shards(articles)
+            shards = self._build_category_suggestion_shards(articles, threshold=threshold)
         self.logger.info("Category suggestion shard mode: shard_count=%d", len(shards))
 
         merged: list[str] = []

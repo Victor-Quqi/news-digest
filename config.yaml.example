@@ -30,12 +30,10 @@ ai:
   timeout: 180
   # Reference context window used only for local shard planning.
   context_window: 128000
-  # Start sharding when estimated tokens exceed this ratio of context_window.
+  # Per-shard token budget as a ratio of context_window.
   shard_threshold_ratio: 0.6
-  # Hard limit for the number of articles sent in one summarization shard.
+  # Start sharding above this count and cap every shard at this size.
   shard_max_articles: 35
-  # Hard limit for the combined character count of one summarization shard.
-  shard_max_chars: 120000
   # Structured output formats to try for summarization / categorization, in order.
   # Supported values: json_schema, json_object. Use [] to disable structured output.
   structured_output_summarization_formats: ["json_schema", "json_object"]

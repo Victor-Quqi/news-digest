@@ -48,7 +48,6 @@ class AIConfig:
     context_window: int = 128000
     shard_threshold_ratio: float = 0.6
     shard_max_articles: int = 35
-    shard_max_chars: int = 120000
     structured_output_summarization_formats: List[str] = field(
         default_factory=lambda: ["json_schema", "json_object"]
     )
@@ -375,8 +374,10 @@ def load_config(
             timeout=int(ai_cfg.get("timeout", ai_defaults.timeout)),
             context_window=int(ai_cfg.get("context_window", ai_defaults.context_window)),
             shard_threshold_ratio=float(ai_cfg.get("shard_threshold_ratio", ai_defaults.shard_threshold_ratio)),
-            shard_max_articles=int(ai_cfg.get("shard_max_articles", ai_defaults.shard_max_articles)),
-            shard_max_chars=int(ai_cfg.get("shard_max_chars", ai_defaults.shard_max_chars)),
+            shard_max_articles=max(
+                int(ai_cfg.get("shard_max_articles", ai_defaults.shard_max_articles)),
+                1,
+            ),
             structured_output_summarization_formats=_to_optional_string_list(
                 ai_cfg.get("structured_output_summarization_formats", ai_defaults.structured_output_summarization_formats),
                 ai_defaults.structured_output_summarization_formats,
