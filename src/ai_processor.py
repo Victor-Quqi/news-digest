@@ -678,7 +678,6 @@ class AIProcessor:
         shard_label: str = "",
     ) -> dict[int, dict[str, str]]:
         expected_ids = {article.id for article in articles}
-        title_by_id = {article.id: article.title for article in articles}
         prefix = f"      {shard_label} " if shard_label else "    "
         request = self._prompt_builder.build_summarization_request(articles)
         return await self._run_json_phase(
@@ -688,7 +687,6 @@ class AIProcessor:
             validate_fn=lambda data: self._outputs.normalize_summarization_result(
                 data,
                 expected_ids=expected_ids,
-                title_by_id=title_by_id,
             ),
             timer_api_label=f"{prefix}API",
             timer_validate_label=f"{prefix}Validate",

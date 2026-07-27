@@ -22,34 +22,29 @@ def make_outputs(locale: Locale | SimpleNamespace | None = None) -> AIOutputProc
     )
 
 
-class SummarizationAlignmentTest(unittest.TestCase):
+class SummarizationValidationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.outputs = make_outputs()
 
-    def test_low_confidence_cross_match_does_not_fail(self) -> None:
-        mismatch = self.outputs.find_summarization_alignment_mismatch(
-            article_id=9,
-            one_line="特朗普称美国可在两到三周内结束对伊朗的军事打击。",
-            title_by_id={
-                1: "特朗普称美国将结束对伊朗行动。",
-                9: "多家银行下调短期存款利率，流动性预期偏松。",
+    def test_accepts_structurally_valid_summaries(self) -> None:
+        rows = self.outputs.validate_summarization(
+            {
+                "perArticle": [
+                    {"id": 3, "oneLine": "英伟达正洽谈为 OpenAI 数据中心提供融资担保。"},
+                    {"id": 6, "oneLine": "英伟达正讨论为 OpenAI 俄亥俄州数据中心提供财务担保。"},
+                ]
             },
+            expected_ids={3, 6},
         )
 
-        self.assertIsNone(mismatch)
+        self.assertEqual([row["id"] for row in rows], [3, 6])
 
-    def test_high_confidence_cross_match_still_fails(self) -> None:
-        mismatch = self.outputs.find_summarization_alignment_mismatch(
-            article_id=9,
-            one_line="特朗普称美国可在两到三周内结束对伊朗的军事打击。",
-            title_by_id={
-                1: "特朗普称美国将在两到三周内结束伊朗行动。",
-                9: "多家银行下调短期存款利率，流动性预期偏松。",
-            },
-        )
-
-        self.assertEqual(mismatch, (1, 0.0, mismatch[2]))
-        self.assertGreaterEqual(mismatch[2], 0.45)
+    def test_rejects_incomplete_id_set(self) -> None:
+        with self.assertRaisesRegex(ValueError, "id set mismatch"):
+            self.outputs.validate_summarization(
+                {"perArticle": [{"id": 3, "oneLine": "摘要"}]},
+                expected_ids={3, 6},
+            )
 
 
 class OverviewValidationTest(unittest.TestCase):

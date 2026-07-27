@@ -40,12 +40,10 @@ class AIOutputProcessor:
         data: dict[str, Any],
         *,
         expected_ids: set[int],
-        title_by_id: dict[int, str],
     ) -> dict[int, dict[str, str]]:
         parsed = self.validate_summarization(
             data,
             expected_ids=expected_ids,
-            title_by_id=title_by_id,
         )
         return {
             entry["id"]: {"one_line": entry["oneLine"]}
@@ -74,7 +72,6 @@ class AIOutputProcessor:
         data: dict[str, Any],
         *,
         expected_ids: set[int],
-        title_by_id: dict[int, str],
     ) -> list[dict[str, Any]]:
         per_article = data.get("perArticle")
         if not isinstance(per_article, list):
@@ -103,16 +100,6 @@ class AIOutputProcessor:
                 trim_target=self._one_line_trim_target_units,
                 item_id=article_id,
             )
-            mismatch = self.find_summarization_alignment_mismatch(
-                article_id=article_id,
-                one_line=one_line,
-                title_by_id=title_by_id,
-            )
-            if mismatch is not None:
-                best_id, own_score, best_score = mismatch
-                raise ValueError(
-                    f"id={article_id} oneLine alignment mismatch (self={own_score:.2f}, best_id={best_id}, best={best_score:.2f})"
-                )
             if article_id in seen_ids:
                 raise ValueError(f"duplicate id: {article_id}")
 
@@ -413,30 +400,6 @@ class AIOutputProcessor:
     def normalize_category(self, category: str) -> str:
         return (category or "").strip()
 
-    def find_summarization_alignment_mismatch(
-        self,
-        *,
-        article_id: int,
-        one_line: str,
-        title_by_id: dict[int, str],
-    ) -> tuple[int, float, float] | None:
-        own_title = title_by_id.get(article_id, "")
-        own_score = self._title_overlap_score(one_line, own_title)
-        if own_score >= 0.18:
-            return None
-
-        best_id = article_id
-        best_score = own_score
-        for candidate_id, candidate_title in title_by_id.items():
-            score = self._title_overlap_score(one_line, candidate_title)
-            if score > best_score:
-                best_score = score
-                best_id = candidate_id
-
-        if best_id != article_id and best_score >= 0.45 and best_score - own_score >= 0.25:
-            return (best_id, own_score, best_score)
-        return None
-
     def coerce_summary_lines(self, data: Any, depth: int = 0) -> list[str] | None:
         if depth > 4:
             return None
@@ -511,41 +474,6 @@ class AIOutputProcessor:
         if value > hard_limit:
             self._logger.info("%s slightly over limit (%.1f), keeping original", context, value)
         return text
-
-    def _match_tokens(self, text: str) -> set[str]:
-        stopwords = {
-            "今日",
-            "中国",
-            "美国",
-            "全球",
-            "市场",
-            "公司",
-            "发布",
-            "宣布",
-            "表示",
-            "消息",
-            "预计",
-            "同比",
-            "小时",
-            "美元",
-        }
-        tokens: set[str] = set()
-        for raw in re.findall(r"[\u4e00-\u9fff]{2,}|[a-z0-9]{2,}", (text or "").lower()):
-            if len(raw) >= 2 and not raw[0].isascii():
-                for idx in range(len(raw) - 1):
-                    bigram = raw[idx : idx + 2]
-                    if bigram not in stopwords:
-                        tokens.add(bigram)
-            elif raw not in stopwords:
-                tokens.add(raw)
-        return tokens
-
-    def _title_overlap_score(self, summary: str, title: str) -> float:
-        summary_tokens = self._match_tokens(summary)
-        title_tokens = self._match_tokens(title)
-        if not summary_tokens or not title_tokens:
-            return 0.0
-        return len(summary_tokens & title_tokens) / max(len(summary_tokens), 1)
 
     def _char_units(self, ch: str) -> float:
         if not ch or ch.isspace():
